@@ -8,24 +8,21 @@ USERNAME = os.environ.get("LINGOS_USER", "").strip()
 PASSWORD = os.environ.get("LINGOS_PASS", "").strip()
 
 def accept_cookies_if_present(page):
-    """Automatycznie zamyka/akceptuje wyskakujące banery z plikami cookies/RODO."""
+    """Zamykanie wyskakujących banerów RODO / Cookies."""
     cookie_selectors = [
         "button:has-text('Akceptuj')",
         "button:has-text('Zgadzam się')",
         "button:has-text('Zezwól')",
         "button:has-text('Akceptuję')",
         "button:has-text('Accept')",
-        "button:has-text('OK')",
-        "#cookie-consent-accept",
-        ".cookie-agree"
+        "button:has-text('OK')"
     ]
     for selector in cookie_selectors:
         try:
             btn = page.locator(selector).first
-            if btn.is_visible(timeout=1000):
-                print(f"[+] Zamykanie baneru cookies ({selector})...")
+            if btn.is_visible(timeout=500):
                 btn.click()
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(500)
                 break
         except Exception:
             pass
@@ -45,98 +42,91 @@ def run():
 
         try:
             print("=== START BOT LINGOS ===")
-            print("[1] Otwieranie strony logowania: https://lingos.pl/h/login ...")
+            print("[1] Logowanie na https://lingos.pl/h/login ...")
             
             page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(2000)
-
-            # Obsługa Cookies
             accept_cookies_if_present(page)
-            page.screenshot(path="01_login_page.png")
 
-            # Wprowadzanie danych logowania
-            print("[2] Wprowadzanie danych logowania...")
-            login_field = page.locator("input[name='login'], input[name='email'], input[name='username'], input[type='email'], input[type='text']").first
+            # Logowanie
+            login_field = page.locator("input[name='login'], input[name='email'], input[type='email'], input[type='text']").first
             login_field.wait_for(state="visible", timeout=10000)
             login_field.fill(USERNAME)
 
             pass_field = page.locator("input[name='password'], input[type='password']").first
             pass_field.fill(PASSWORD)
 
-            page.screenshot(path="02_filled.png")
-
-            print("[3] Klikanie przycisku Zaloguj...")
             submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Zaloguj')").first
             submit_btn.click()
 
-            page.wait_for_timeout(4000)
+            page.wait_for_timeout(3000)
             accept_cookies_if_present(page)
-            page.screenshot(path="03_after_login.png")
 
-            # Weryfikacja zalogowania
             if "login" in page.url.lower():
-                print("[X] BŁĄD LOGOWANIA: Odrzucono dane logowania lub strona przekierowała z powrotem do formularza!")
+                print("[X] BŁĄD LOGOWANIA: Odrzucono dane logowania!")
                 page.screenshot(path="error.png")
                 sys.exit(1)
 
-            print(f"[OK] Zalogowano pomyślnie. Aktualny adres: {page.url}")
+            print(f"[OK] Zalogowano pomyślnie. Strona: {page.url}")
 
-            # Szukanie przycisku do rozpoczęcia lekcji/sesji
-            print("[4] Szukanie przycisku rozpoczęcia lekcji...")
+            # Szukanie i klikanie przycisku startu lekcji
+            print("[2] Otwieranie lekcji...")
             start_btn = page.locator("a:has-text('Lekcja'), button:has-text('Lekcja'), a:has-text('Rozpocznij'), button:has-text('Rozpocznij'), a:has-text('Start'), button:has-text('Start'), a[href*='learning']").first
-            
             if start_btn.is_visible(timeout=5000):
-                print("[+] Znaleziono przycisk lekcji! Przechodzenie do lekcji...")
                 start_btn.click()
                 page.wait_for_timeout(3000)
-            else:
-                print("[!] Brak bezpośredniego przycisku lekcji na stronie głównej, sprawdzam czy sesja trwa...")
 
-            page.screenshot(path="04_session_start.png")
-
-            # Rozwiązywanie lekcji
-            print("[5] Rozpoczynanie wykonywania słówek...")
+            # Główna pętla rozwiązywania powtórek
+            print("[3] Rozpoczynam odpowiadanie na słówka w lekcji...")
             solved_steps = 0
-            
-            for step in range(1, 35):
-                # Symulacja naturalnego czasu reakcji człowieka (2 do 4 sekund)
+
+            for step in range(1, 40):
+                # Symulacja naturalnego odstępu czasowego (2 do 4 sekund)
                 wait_time = random.uniform(2.0, 4.0)
                 page.wait_for_timeout(int(wait_time * 1000))
-
                 accept_cookies_if_present(page)
 
-                # Wykrywanie końca lekcji
+                # Sprawdzenie czy nie nastąpił koniec lekcji
                 body_text = page.inner_text("body").lower()
-                if "koniec lekcji" in body_text or "gratulacje" in body_text or "podsumowanie" in body_text or "brak słówek" in body_text:
-                    print("[+] Wykryto tekst końcowy – lekcja zakończona!")
+                if "koniec lekcji" in body_text or "gratulacje" in body_text or "ukończono" in body_text or "podsumowanie" in body_text:
+                    print("[+] Wykryto podsumowanie / koniec lekcji!")
                     break
 
-                # Szukamy pola do wpisania odpowiedzi
-                input_answer = page.locator("input[type='text']:not([readonly])").first
-                
-                if input_answer.is_visible(timeout=2000):
-                    submit_answer = page.locator("button[type='submit'], button:has-text('Sprawdź'), button:has-text('Dalej')").first
-                    if submit_answer.is_visible():
-                        submit_answer.click()
-                        solved_steps += 1
-                        print(f"    Krok {step}: Zatwierdzono odpowiedź.")
+                # 1. Szukamy pola tekstowego z wpisywaniem odpowiedzi
+                input_answer = page.locator("input[placeholder*='odpowiedź'], input[placeholder*='Odpowiedź'], input[type='text']:not([readonly])").first
+
+                if input_answer.is_visible(timeout=2500):
+                    # Wprowadzamy odpowiedź (np. "test" lub cokolwiek, jeśli nie znamy słówka)
+                    input_answer.fill("a")
+                    page.wait_for_timeout(500)
+                    
+                    # Wciśnięcie Enter w polu odpowiedzi
+                    input_answer.press("Enter")
+                    solved_steps += 1
+                    print(f"    Krok {step}: Wpisano odpowiedź i naciśnięto Enter.")
+                    
+                    # Sprawdzamy czy trzeba kliknąć przycisk zatwierdzenia jeśli Enter nie zadziałał
+                    check_btn = page.locator("button:has-text('Sprawdź'), button:has-text('Wyślij'), button[type='submit']").first
+                    if check_btn.is_visible(timeout=1000):
+                        check_btn.click()
                 else:
-                    # Jeśli brak pola tekstowego, szukamy przycisku przejścia dalej
-                    next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), button:has-text('Kontynuuj')").first
+                    # 2. Szukamy przycisku przejścia do następnego słówka ("Dalej" / "Kontynuuj")
+                    next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), button:has-text('Kontynuuj'), button:has-text('Następne')").first
                     if next_btn.is_visible(timeout=2000):
                         next_btn.click()
                         solved_steps += 1
-                        print(f"    Krok {step}: Kliknięto Dalej.")
+                        print(f"    Krok {step}: Kliknięto przycisk 'Dalej'.")
                     else:
-                        print("    [i] Brak kolejnych pytań/przycisków – prawdopodobnie koniec sesji.")
-                        break
+                        # Jeśli ani pole tekstowe ani 'Dalej' nie są widoczne, próbujemy nacisnąć Enter ogólnie
+                        page.keyboard.press("Enter")
+                        print(f"    Krok {step}: Brak widocznych przycisków, wysłano zdarzenie Enter.")
 
             page.wait_for_timeout(2000)
             page.screenshot(path="05_finished.png")
             print(f"=== ZAKOŃCZONO SESJĘ (Wykonane kroki: {solved_steps}) ===")
 
         except Exception as e:
-            print(f"[X] Wystąpił błąd podczas działania programu: {e}")
+            print(f"[X] Wystąpił błąd: {e}")
             page.screenshot(path="error.png")
             sys.exit(1)
         finally:
