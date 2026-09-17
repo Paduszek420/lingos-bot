@@ -8,7 +8,7 @@ USERNAME = os.environ.get("LINGOS_USER", "").strip()
 PASSWORD = os.environ.get("LINGOS_PASS", "").strip()
 
 if not USERNAME or not PASSWORD:
-    print("[X] BŁĄD: Brak danych logowania w Secrets!")
+    print("[X] BŁĄD: Brak danych logowania LINGOS_USER / LINGOS_PASS w Secrets!")
     exit(1)
 
 session = requests.Session()
@@ -19,56 +19,88 @@ session.headers.update({
 })
 
 LOGIN_URL = "https://lingos.pl/h/login"
-START_URL = "https://lingos.pl/learning/start/0?groupId=19788"
 
 try:
     print("1. Pobieranie formularza logowania...")
-    res = session.get(LOGIN_URL, timeout=10)
+    res = session.get(LOGIN_URL, timeout=15)
     soup = BeautifulSoup(res.text, 'html.parser')
     
     form = soup.find('form')
+    if not form:
+        print("[X] BŁĄD: Nie znaleziono formularza logowania.")
+        exit(1)
+
     payload = {}
-    if form:
-        for inp in form.find_all('input'):
-            name = inp.get('name')
-            val = inp.get('value', '')
-            if name:
-                payload[name] = val
-    
+    for inp in form.find_all('input'):
+        name = inp.get('name')
+        val = inp.get('value', '')
+        if name:
+            payload[name] = val
+            
     payload['login'] = USERNAME
+    payload['email'] = USERNAME
     payload['password'] = PASSWORD
 
-    action_url = form.get('action') if form and form.get('action') else LOGIN_URL
+    action_url = form.get('action') or LOGIN_URL
     if not action_url.startswith("http"):
         action_url = "https://lingos.pl" + action_url
 
-    print("2. Logowanie...")
-    post_res = session.post(action_url, data=payload, timeout=10)
+    print(f"2. Logowanie użytkownika '{USERNAME}'...")
+    post_res = session.post(action_url, data=payload, timeout=15)
 
-    # Weryfikacja czy strona przekierowała po logowaniu
-    if "login" in post_res.url.lower():
-        print("[X] BŁĄD LOGOWANIA: Odrzucono login/hasło lub przekierowano z powrotem do formularza.")
-        print("Sprawdź LINGOS_USER i LINGOS_PASS w Secrets.")
+    if "login" in post_res.url.lower() and "wyloguj" not in post_res.text.lower():
+        print("[X] BŁĄD LOGOWANIA: Odrzucono dane logowania lub przekierowano do logowania.")
+        print("Sprawdź, czy LINGOS_USER i LINGOS_PASS w Secrets są wpisane poprawnie.")
         exit(1)
 
-    print("[OK] Zalogowano pomyślnie. Otwieranie lekcji...")
+    print(f"[OK] Zalogowano! Aktualna strona: {post_res.url}")
     
+    # 3. Automatyczne wykrywanie linku do lekcji
+    start_url = None
+    dashboard_soup = BeautifulSoup(post_res.text, 'html.parser')
+    
+    for a in dashboard_soup.find_all('a', href=True):
+        href = a['href']
+        if '/learning/start' in href or '/start' in href or 'learning' in href:
+            start_url = href
+            break
+
+    if not start_url:
+        for extra_path in ["/h/student", "/students", "/h/dashboard", "/students/group"]:
+            test_res = session.get("https://lingos.pl" + extra_path, timeout=10)
+            test_soup = BeautifulSoup(test_res.text, 'html.parser')
+            for a in test_soup.find_all('a', href=True):
+                if '/learning/start' in a['href'] or '/start' in a['href']:
+                    start_url = a['href']
+                    break
+            if start_url:
+                break
+
+    if start_url:
+        if not start_url.startswith("http"):
+            start_url = "https://lingos.pl" + start_url
+        print(f"Znaleziono link do lekcji: {start_url}")
+        current_url = start_url
+    else:
+        print("[!] Nie znaleziono osobnego linku startowego. Używam głównej strony po zalogowaniu.")
+        current_url = post_res.url
+
+    # 4. Pętla rozwiązywania lekcji
     solved_count = 0
-    current_url = START_URL
     dictionary = {}
     
     for step in range(25):
-        page = session.get(current_url, timeout=10)
+        page = session.get(current_url, timeout=15)
         soup = BeautifulSoup(page.text, 'html.parser')
         
         page_text = page.text.lower()
-        if "koniec lekcji" in page_text or "gratulacje" in page_text or "brak słówek" in page_text:
-            print("[+] Wykryto koniec lekcji!")
+        if "koniec lekcji" in page_text or "gratulacje" in page_text or "brak słówek" in page_text or "ukończona" in page_text:
+            print("[+] Lekcja została ukończona!")
             break
             
         step_form = soup.find('form')
         if not step_form:
-            print(f"[!] Nie znaleziono formularza ze słówkami pod adresem: {current_url}")
+            print(f"[!] Brak formularza na stronie: {current_url}")
             break
             
         step_action = step_form.get('action') or current_url
@@ -103,16 +135,17 @@ try:
         print(f"[{step+1}] Słówko: '{word_text}' | Odpowiedź: '{answer}' | Czekam {wait}s...")
         time.sleep(wait)
         
-        p_res = session.post(step_action, data=step_data, timeout=10)
+        p_res = session.post(step_action, data=step_data, timeout=15)
         if p_res.url:
             current_url = p_res.url
         solved_count += 1
 
     if solved_count == 0:
-        print("[X] BŁĄD: Skrypt nie przerobił ani jednego słówka! Oznaczam proces jako nieudany.")
+        print("[X] BŁĄD: Skrypt nie przerobił ani jednego słówka!")
+        print("Możliwe powody: lekcja na dziś jest już zrobiona lub brak aktywnych zadań w grupie.")
         exit(1)
         
-    print(f"=== PRZEROBIONO SŁÓWEK: {solved_count} ===")
+    print(f"=== SUKCES! PRZEROBIONO SŁÓWEK: {solved_count} ===")
 
 except Exception as e:
     print(f"[X] Wystąpił błąd: {e}")
