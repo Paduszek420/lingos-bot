@@ -20,7 +20,7 @@ dictionary = {}
 
 # 1. Logowanie do Lingos.pl
 print("Logowanie do Lingos.pl...")
-login_url = "https://lingos.pl/login"
+login_url = "https://lingos.pl/h/login"
 login_page = session.get(login_url)
 soup = BeautifulSoup(login_page.text, 'html.parser')
 
