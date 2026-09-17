@@ -1,140 +1,89 @@
 import os
 import time
 import random
-import requests
-from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 USERNAME = os.environ.get("LINGOS_USER", "").strip()
 PASSWORD = os.environ.get("LINGOS_PASS", "").strip()
 
 if not USERNAME or not PASSWORD:
-    print("[X] BŁĄD: Brak danych logowania w Secrets (LINGOS_USER / LINGOS_PASS)!")
+    print("[X] BŁĄD: Brak danych w Secrets!")
     exit(1)
 
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://lingos.pl/h/login"
-})
+with sync_playwright() as p:
+    print("1. Uruchamianie wirtualnej przeglądarki Chrome...")
+    browser = p.chromium.launch(headless=True)
+    context = browser.new_context()
+    page = context.new_page()
 
-LOGIN_URL = "https://lingos.pl/h/login"
+    print("2. Logowanie...")
+    page.goto("https://lingos.pl/h/login")
+    page.wait_for_selector("input", timeout=10000)
 
-try:
-    print("1. Pobieranie tokenów sesji ze strony logowania...")
-    res = session.get(LOGIN_URL, timeout=15)
-    soup = BeautifulSoup(res.text, 'html.parser')
+    # Wpisywanie danych logowania
+    page.fill("input[name='login'], input[name='email'], input[type='text']", USERNAME)
+    page.fill("input[type='password']", PASSWORD)
+    page.click("button[type='submit'], input[type='submit']")
+    
+    page.wait_for_timeout(3000)
 
-    form = soup.find('form')
-    if not form:
-        print("[X] BŁĄD: Nie znaleziono formularza na stronie logowania.")
+    if "login" in page.url.lower():
+        print("[X] BŁĄD LOGOWANIA: Odrzucono dane.")
+        browser.close()
         exit(1)
 
-    # Automatyczne zbieranie wszystkich ukrytych pól (tokeny CSRF itp.)
-    payload = {}
-    for inp in form.find_all('input'):
-        name = inp.get('name')
-        val = inp.get('value', '')
-        if name:
-            payload[name] = val
+    print(f"[OK] Zalogowano! Otwieranie lekcji...")
 
-    # Przypisanie loginu i hasła do wykrytych pól
-    for key in list(payload.keys()):
-        key_lower = key.lower()
-        if 'user' in key_lower or 'login' in key_lower or 'email' in key_lower:
-            payload[key] = USERNAME
-        elif 'pass' in key_lower:
-            payload[key] = PASSWORD
+    # Wejście bezpośrednio w link lekcji z Twojej grupy
+    page.goto("https://lingos.pl/learning/start/0?groupId=19788")
+    page.wait_for_timeout(3000)
 
-    payload['login'] = USERNAME
-    payload['email'] = USERNAME
-    payload['password'] = PASSWORD
-
-    action_url = form.get('action') or LOGIN_URL
-    if not action_url.startswith("http"):
-        action_url = "https://lingos.pl" + action_url
-
-    print(f"2. Wysyłanie logowania do: {action_url}...")
-    post_res = session.post(action_url, data=payload, timeout=15)
-
-    page_text = post_res.text.lower()
-    # Weryfikacja udanego logowania
-    if "wyloguj" in page_text or "logout" in page_text or "moje grupy" in page_text or post_res.url != LOGIN_URL:
-        print(f"[OK] Zalogowano pomyślnie! URL po logowaniu: {post_res.url}")
-    else:
-        print("[X] BŁĄD LOGOWANIA: Serwer nie zalogował użytkownika.")
-        print(f"URL docelowy: {post_res.url}")
-        print("Najczęstsza przyczyna: spacja na początku/końcu loginu lub hasła w Secrets na GitHubie.")
-        exit(1)
-
-    # 3. Szukanie linku do lekcji
-    start_url = None
-    dash_soup = BeautifulSoup(post_res.text, 'html.parser')
-    for a in dash_soup.find_all('a', href=True):
-        if '/learning/start' in a['href'] or '/start' in a['href']:
-            start_url = a['href']
-            break
-
-    if not start_url:
-        for path in ["/h/student", "/students", "/students/group"]:
-            r = session.get("https://lingos.pl" + path, timeout=10)
-            s = BeautifulSoup(r.text, 'html.parser')
-            for a in s.find_all('a', href=True):
-                if '/learning/start' in a['href'] or '/start' in a['href']:
-                    start_url = a['href']
-                    break
-            if start_url:
-                break
-
-    current_url = ("https://lingos.pl" + start_url) if start_url and not start_url.startswith("http") else (start_url or post_res.url)
-    print(f"Startowanie lekcji pod adresem: {current_url}")
-
-    # 4. Wykonywanie słówek
-    solved_count = 0
+    solved = 0
     dictionary = {}
 
-    for step in range(25):
-        page = session.get(current_url, timeout=15)
-        soup = BeautifulSoup(page.text, 'html.parser')
-
-        if "koniec lekcji" in page.text.lower() or "gratulacje" in page.text.lower():
-            print("[+] Lekcja zakończona!")
+    for step in range(30):
+        content = page.content().lower()
+        if "koniec" in content or "gratulacje" in content or "brak słówek" in content or "podsumowanie" in content:
+            print("[+] Lekcja została w pełni ukończona!")
             break
 
-        step_form = soup.find('form')
-        if not step_form:
-            print("[!] Brak formularza ze słówkiem na stronie.")
+        ans_input = page.query_selector("input[type='text']:not([readonly])")
+        if not ans_input:
+            print("[!] Brak pola do wpisania odpowiedzi. Lekcja dobiegła końca.")
             break
 
-        step_action = step_form.get('action') or current_url
-        if not step_action.startswith("http"):
-            step_action = "https://lingos.pl" + step_action
-
-        step_data = {inp.get('name'): inp.get('value', '') for inp in step_form.find_all('input') if inp.get('name')}
-
-        word_el = soup.find('div', {'class': 'word-to-translate'}) or soup.find('h3') or soup.find('strong')
-        word_text = word_el.text.strip() if word_el else "słówko"
-
-        correct_el = soup.find('span', {'class': 'correct-answer'}) or soup.find('div', {'class': 'alert-success'})
-        if correct_el:
-            dictionary[word_text] = correct_el.text.strip()
+        # Pobieranie tekstu słówka do przetłumaczenia
+        word_el = page.query_selector(".word-to-translate, h3, strong")
+        word_text = word_el.inner_text().strip() if word_el else "słówko"
 
         answer = dictionary.get(word_text, "")
-        ans_name = next((inp.get('name') for inp in step_form.find_all('input') if inp.get('type') == 'text' or 'ans' in inp.get('name', '')), 'answer')
-        step_data[ans_name] = answer
-
+        
+        # Fizyczne wpisywanie odpowiedzi i odczekanie
+        ans_input.fill(answer)
         wait = random.randint(2, 4)
         print(f"[{step+1}] Słówko: '{word_text}' | Odpowiedź: '{answer}' | Czekam {wait}s...")
         time.sleep(wait)
 
-        p_res = session.post(step_action, data=step_data, timeout=15)
-        if p_res.url:
-            current_url = p_res.url
-        solved_count += 1
+        # Kliknięcie Enter / Wyślij
+        submit_btn = page.query_selector("button[type='submit'], input[type='submit']")
+        if submit_btn:
+            submit_btn.click()
+        else:
+            ans_input.press("Enter")
 
-    print(f"=== PRZEROBIONO SŁÓWEK: {solved_count} ===")
+        page.wait_for_timeout(2500)
 
-except Exception as e:
-    print(f"[X] Błąd wykonania: {e}")
-    exit(1)
+        # Pobieranie poprawnej odpowiedzi po błędzie
+        correct_el = page.query_selector(".correct-answer, .alert-success")
+        if correct_el:
+            dictionary[word_text] = correct_el.inner_text().strip()
+
+        solved += 1
+
+    if solved == 0:
+        print("[X] Skrypt nie rozwiązał żadnego słówka!")
+        browser.close()
+        exit(1)
+
+    print(f"=== SUKCES: Zaliczone słówka/kroki: {solved} ===")
+    browser.close()
