@@ -20,9 +20,9 @@ def accept_cookies_if_present(page):
     for selector in cookie_selectors:
         try:
             btn = page.locator(selector).first
-            if btn.is_visible(timeout=500):
+            if btn.is_visible(timeout=300):
                 btn.click()
-                page.wait_for_timeout(500)
+                page.wait_for_timeout(300)
                 break
         except Exception:
             pass
@@ -31,6 +31,9 @@ def run():
     if not USERNAME or not PASSWORD:
         print("[X] BŁĄD: Brak LINGOS_USER lub LINGOS_PASS w GitHub Secrets!")
         sys.exit(1)
+
+    # Słownik dynamicznie zapamiętujący poprawne odpowiedzi
+    dictionary = {}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -69,57 +72,65 @@ def run():
 
             print(f"[OK] Zalogowano pomyślnie. Strona: {page.url}")
 
-            # Szukanie i klikanie przycisku startu lekcji
+            # Otwieranie lekcji
             print("[2] Otwieranie lekcji...")
             start_btn = page.locator("a:has-text('Lekcja'), button:has-text('Lekcja'), a:has-text('Rozpocznij'), button:has-text('Rozpocznij'), a:has-text('Start'), button:has-text('Start'), a[href*='learning']").first
             if start_btn.is_visible(timeout=5000):
                 start_btn.click()
                 page.wait_for_timeout(3000)
 
-            # Główna pętla rozwiązywania powtórek
-            print("[3] Rozpoczynam odpowiadanie na słówka w lekcji...")
+            print("[3] Rozpoczynam rozwiązywanie lekcji...")
             solved_steps = 0
 
-            for step in range(1, 40):
-                # Symulacja naturalnego odstępu czasowego (2 do 4 sekund)
+            for step in range(1, 45):
+                # Symulacja naturalnego opóźnienia czlowieka (2-4 sekundy)
                 wait_time = random.uniform(2.0, 4.0)
                 page.wait_for_timeout(int(wait_time * 1000))
                 accept_cookies_if_present(page)
 
-                # Sprawdzenie czy nie nastąpił koniec lekcji
+                # Wykrywanie końca lekcji
                 body_text = page.inner_text("body").lower()
                 if "koniec lekcji" in body_text or "gratulacje" in body_text or "ukończono" in body_text or "podsumowanie" in body_text:
-                    print("[+] Wykryto podsumowanie / koniec lekcji!")
+                    print("[+] Wykryto koniec lekcji!")
                     break
 
-                # 1. Szukamy pola tekstowego z wpisywaniem odpowiedzi
+                # Pobranie słówka do przetłumaczenia (np. "odpaść, wycofać się")
+                word_element = page.locator("h1, h2, h3, div:has-text('PRZETŁUMACZ') + div, .word-title").first
+                current_word = word_element.inner_text().strip() if word_element.is_visible() else ""
+
+                # 1. Szukamy pola wpisywania odpowiedzi
                 input_answer = page.locator("input[placeholder*='odpowiedź'], input[placeholder*='Odpowiedź'], input[type='text']:not([readonly])").first
 
-                if input_answer.is_visible(timeout=2500):
-                    # Wprowadzamy odpowiedź (np. "test" lub cokolwiek, jeśli nie znamy słówka)
-                    input_answer.fill("a")
-                    page.wait_for_timeout(500)
+                if input_answer.is_visible(timeout=2000):
+                    # Sprawdzamy czy mamy już to słówko w pamięci słownika
+                    answer_to_type = dictionary.get(current_word, "a")
                     
-                    # Wciśnięcie Enter w polu odpowiedzi
+                    input_answer.fill(answer_to_type)
+                    page.wait_for_timeout(300)
                     input_answer.press("Enter")
                     solved_steps += 1
-                    print(f"    Krok {step}: Wpisano odpowiedź i naciśnięto Enter.")
-                    
-                    # Sprawdzamy czy trzeba kliknąć przycisk zatwierdzenia jeśli Enter nie zadziałał
-                    check_btn = page.locator("button:has-text('Sprawdź'), button:has-text('Wyślij'), button[type='submit']").first
-                    if check_btn.is_visible(timeout=1000):
-                        check_btn.click()
+                    print(f"    Krok {step}: Wpisano '{answer_to_type}' dla słówka '{current_word}'.")
+                    page.wait_for_timeout(1000)
+
+                # 2. Odczytanie poprawnej odpowiedzi (jeśli poprzednia była błędna) i kliknięcie "Dalej [Enter]"
+                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), button:has-text('Enter')").first
+                
+                if next_btn.is_visible(timeout=2000):
+                    # Jeśli widoczny jest napis o błędnej odpowiedzi, pobieramy poprawną treść do słownika
+                    correct_ans_box = page.locator(".bg-red-100, .border-red-500, div:has-text('BŁĘDNA ODPOWIEDŹ')").first
+                    if correct_ans_box.is_visible():
+                        correct_text = correct_ans_box.inner_text().strip()
+                        if current_word and correct_text:
+                            # Czyszczenie tekstu z niepotrzebnych fraz
+                            clean_ans = correct_text.replace("BŁĘDNA ODPOWIEDŹ", "").strip()
+                            dictionary[current_word] = clean_ans
+                            print(f"    [+] Zapamiętano poprawną odpowiedź: '{current_word}' -> '{clean_ans}'")
+
+                    next_btn.click()
+                    print(f"    Krok {step}: Kliknięto 'Dalej [Enter]'.")
                 else:
-                    # 2. Szukamy przycisku przejścia do następnego słówka ("Dalej" / "Kontynuuj")
-                    next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), button:has-text('Kontynuuj'), button:has-text('Następne')").first
-                    if next_btn.is_visible(timeout=2000):
-                        next_btn.click()
-                        solved_steps += 1
-                        print(f"    Krok {step}: Kliknięto przycisk 'Dalej'.")
-                    else:
-                        # Jeśli ani pole tekstowe ani 'Dalej' nie są widoczne, próbujemy nacisnąć Enter ogólnie
-                        page.keyboard.press("Enter")
-                        print(f"    Krok {step}: Brak widocznych przycisków, wysłano zdarzenie Enter.")
+                    # Alternatywne zatwierdzenie klawiszem Enter
+                    page.keyboard.press("Enter")
 
             page.wait_for_timeout(2000)
             page.screenshot(path="05_finished.png")
