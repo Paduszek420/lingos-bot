@@ -2,142 +2,134 @@ import os
 import sys
 import time
 import random
+import re
 from playwright.sync_api import sync_playwright
 
 USERNAME = os.environ.get("LINGOS_USER", "").strip()
 PASSWORD = os.environ.get("LINGOS_PASS", "").strip()
 
 def accept_cookies_if_present(page):
-    """Zamykanie wyskakujących banerów RODO / Cookies."""
     cookie_selectors = [
         "button:has-text('Akceptuj')",
         "button:has-text('Zgadzam się')",
         "button:has-text('Zezwól')",
-        "button:has-text('Akceptuję')",
-        "button:has-text('Accept')",
-        "button:has-text('OK')"
+        "button:has-text('Akceptuję')"
     ]
     for selector in cookie_selectors:
         try:
             btn = page.locator(selector).first
-            if btn.is_visible(timeout=300):
+            if btn.is_visible(timeout=200):
                 btn.click()
-                page.wait_for_timeout(300)
+                page.wait_for_timeout(200)
                 break
         except Exception:
             pass
 
 def run():
     if not USERNAME or not PASSWORD:
-        print("[X] BŁĄD: Brak LINGOS_USER lub LINGOS_PASS w GitHub Secrets!")
+        print("[X] BŁĄD: Brak danych w Secrets!")
         sys.exit(1)
 
-    # Słownik dynamicznie zapamiętujący poprawne odpowiedzi
     dictionary = {}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={'width': 1280, 'height': 720},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36'
         )
         page = context.new_page()
 
         try:
             print("=== START BOT LINGOS ===")
-            print("[1] Logowanie na https://lingos.pl/h/login ...")
-            
             page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(1500)
             accept_cookies_if_present(page)
 
             # Logowanie
-            login_field = page.locator("input[name='login'], input[name='email'], input[type='email'], input[type='text']").first
-            login_field.wait_for(state="visible", timeout=10000)
+            login_field = page.locator("input[name='login'], input[name='email'], input[type='text']").first
             login_field.fill(USERNAME)
 
             pass_field = page.locator("input[name='password'], input[type='password']").first
             pass_field.fill(PASSWORD)
 
-            submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Zaloguj')").first
-            submit_btn.click()
-
-            page.wait_for_timeout(3000)
-            accept_cookies_if_present(page)
+            page.locator("button[type='submit'], input[type='submit']").first.click()
+            page.wait_for_timeout(2500)
 
             if "login" in page.url.lower():
-                print("[X] BŁĄD LOGOWANIA: Odrzucono dane logowania!")
-                page.screenshot(path="error.png")
+                print("[X] BŁĄD LOGOWANIA!")
                 sys.exit(1)
 
-            print(f"[OK] Zalogowano pomyślnie. Strona: {page.url}")
+            print("[OK] Zalogowano! Otwieranie lekcji...")
 
-            # Otwieranie lekcji
-            print("[2] Otwieranie lekcji...")
-            start_btn = page.locator("a:has-text('Lekcja'), button:has-text('Lekcja'), a:has-text('Rozpocznij'), button:has-text('Rozpocznij'), a:has-text('Start'), button:has-text('Start'), a[href*='learning']").first
-            if start_btn.is_visible(timeout=5000):
+            # Uruchomienie lekcji
+            start_btn = page.locator("a:has-text('Lekcja'), button:has-text('Lekcja'), a:has-text('Rozpocznij'), button:has-text('Start')").first
+            if start_btn.is_visible(timeout=4000):
                 start_btn.click()
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(2500)
 
-            print("[3] Rozpoczynam rozwiązywanie lekcji...")
             solved_steps = 0
 
-            for step in range(1, 45):
-                # Symulacja naturalnego opóźnienia czlowieka (2-4 sekundy)
-                wait_time = random.uniform(2.0, 4.0)
+            for step in range(1, 50):
+                wait_time = random.uniform(2.0, 3.5)
                 page.wait_for_timeout(int(wait_time * 1000))
                 accept_cookies_if_present(page)
 
-                # Wykrywanie końca lekcji
                 body_text = page.inner_text("body").lower()
-                if "koniec lekcji" in body_text or "gratulacje" in body_text or "ukończono" in body_text or "podsumowanie" in body_text:
+                if "koniec" in body_text or "gratulacje" in body_text or "podsumowanie" in body_text:
                     print("[+] Wykryto koniec lekcji!")
                     break
 
-                # Pobranie słówka do przetłumaczenia (np. "odpaść, wycofać się")
-                word_element = page.locator("h1, h2, h3, div:has-text('PRZETŁUMACZ') + div, .word-title").first
-                current_word = word_element.inner_text().strip() if word_element.is_visible() else ""
+                # Wyciąganie nazwy polskiego słówka (np. odpaść, wycofać się)
+                word_el = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
+                current_word = ""
+                if word_el.is_visible(timeout=500):
+                    raw_word = word_el.inner_text().strip()
+                    # Czyszczenie z nagłówków
+                    current_word = raw_word.replace("PRZETŁUMACZ", "").strip()
 
-                # 1. Szukamy pola wpisywania odpowiedzi
-                input_answer = page.locator("input[placeholder*='odpowiedź'], input[placeholder*='Odpowiedź'], input[type='text']:not([readonly])").first
+                # 1. Sprawdzamy czy widoczne jest pole odpowiedzi
+                input_answer = page.locator("input[placeholder*='odpowiedź'], input[placeholder*='Odpowiedź']").first
 
-                if input_answer.is_visible(timeout=2000):
-                    # Sprawdzamy czy mamy już to słówko w pamięci słownika
+                if input_answer.is_visible(timeout=1500):
+                    # Pobieramy zapamiętaną odpowiedź ze słownika
                     answer_to_type = dictionary.get(current_word, "a")
                     
                     input_answer.fill(answer_to_type)
                     page.wait_for_timeout(300)
                     input_answer.press("Enter")
                     solved_steps += 1
-                    print(f"    Krok {step}: Wpisano '{answer_to_type}' dla słówka '{current_word}'.")
+                    print(f"[{step}] Słówko: '{current_word}' -> Odpowiedź: '{answer_to_type}'")
                     page.wait_for_timeout(1000)
 
-                # 2. Odczytanie poprawnej odpowiedzi (jeśli poprzednia była błędna) i kliknięcie "Dalej [Enter]"
-                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), button:has-text('Enter')").first
+                # 2. Sprawdzamy czy jest ekran z błędną odpowiedzią i przyciskiem "Dalej [Enter]"
+                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
                 
-                if next_btn.is_visible(timeout=2000):
-                    # Jeśli widoczny jest napis o błędnej odpowiedzi, pobieramy poprawną treść do słownika
-                    correct_ans_box = page.locator(".bg-red-100, .border-red-500, div:has-text('BŁĘDNA ODPOWIEDŹ')").first
-                    if correct_ans_box.is_visible():
-                        correct_text = correct_ans_box.inner_text().strip()
-                        if current_word and correct_text:
-                            # Czyszczenie tekstu z niepotrzebnych fraz
-                            clean_ans = correct_text.replace("BŁĘDNA ODPOWIEDŹ", "").strip()
+                if next_btn.is_visible(timeout=1500):
+                    # Pobieranie poprawnej odpowiedzi wyłącznie z czerwonej ramki
+                    correct_box = page.locator(".border-red-500, .bg-red-100, div:has-text('drop out')").first
+                    if correct_box.is_visible(timeout=500):
+                        box_text = correct_box.inner_text().strip()
+                        # Wyciąganie czystego tekstu (odrzucenie 'BŁĘDNA ODPOWIEDŹ')
+                        lines = [line.strip() for line in box_text.split('\n') if line.strip()]
+                        clean_ans = lines[-1] if lines else box_text
+                        clean_ans = re.sub(r'^(BŁĘDNA ODPOWIEDŹ|PRZETŁUMACZ)', '', clean_ans, flags=re.IGNORECASE).strip()
+                        
+                        if current_word and clean_ans and clean_ans != "a":
                             dictionary[current_word] = clean_ans
-                            print(f"    [+] Zapamiętano poprawną odpowiedź: '{current_word}' -> '{clean_ans}'")
+                            print(f"    [+] Zapamiętano do słownika: '{current_word}' = '{clean_ans}'")
 
                     next_btn.click()
-                    print(f"    Krok {step}: Kliknięto 'Dalej [Enter]'.")
+                    print(f"[{step}] Kliknięto 'Dalej'.")
                 else:
-                    # Alternatywne zatwierdzenie klawiszem Enter
                     page.keyboard.press("Enter")
 
             page.wait_for_timeout(2000)
             page.screenshot(path="05_finished.png")
-            print(f"=== ZAKOŃCZONO SESJĘ (Wykonane kroki: {solved_steps}) ===")
+            print(f"=== ZAKOŃCZONO (Wykonane kroki: {solved_steps}) ===")
 
         except Exception as e:
-            print(f"[X] Wystąpił błąd: {e}")
+            print(f"[X] Błąd: {e}")
             page.screenshot(path="error.png")
             sys.exit(1)
         finally:
