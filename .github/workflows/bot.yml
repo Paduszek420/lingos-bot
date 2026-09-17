@@ -28,3 +28,10 @@ jobs:
           LINGOS_USER: ${{ secrets.LINGOS_USER }}
           LINGOS_PASS: ${{ secrets.LINGOS_PASS }}
         run: python main.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lingos-screenshots
+          path: "*.png"
