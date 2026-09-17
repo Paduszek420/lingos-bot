@@ -17,10 +17,10 @@ with sync_playwright() as p:
     page = context.new_page()
 
     print("2. Otwieranie strony logowania...")
-    page.goto("https://lingos.pl/h/login")
+    page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded")
     page.wait_for_timeout(2000)
 
-    # USUWACZ BANERU COOKIES (Cookiebot)
+    # Wyrzucenie banera z plikami cookie (Cookiebot)
     page.evaluate("""() => {
         const dialog = document.getElementById('CybotCookiebotDialog');
         if (dialog) dialog.remove();
@@ -28,10 +28,12 @@ with sync_playwright() as p:
         if (overlay) overlay.remove();
     }""")
 
-    page.wait_for_selector("input", timeout=10000)
+    print("3. Szukanie widocznego pola logowania...")
+    # Czekanie bezpośrednio na WIDOCZNE pole do wpisania loginu
+    page.wait_for_selector("input[name='login'], input[name='email'], input[type='text']:not([type='hidden'])", state="visible", timeout=15000)
 
-    print("3. Wpisywanie danych logowania...")
-    page.fill("input[name='login'], input[name='email'], input[type='text']", USERNAME)
+    print("4. Wpisywanie danych logowania...")
+    page.fill("input[name='login'], input[name='email'], input[type='text']:not([type='hidden'])", USERNAME)
     page.fill("input[type='password']", PASSWORD)
     page.click("button[type='submit'], input[type='submit']", force=True)
     
@@ -44,10 +46,10 @@ with sync_playwright() as p:
 
     print("[OK] Zalogowano pomyślnie! Otwieranie lekcji...")
 
-    page.goto("https://lingos.pl/learning/start/0?groupId=19788")
+    page.goto("https://lingos.pl/learning/start/0?groupId=19788", wait_until="domcontentloaded")
     page.wait_for_timeout(3000)
 
-    # Ponowne usunięcie baneru, gdyby pojawił się w lekcji
+    # Usunięcie banera, gdyby pojawił się po przejściu do lekcji
     page.evaluate("""() => {
         const dialog = document.getElementById('CybotCookiebotDialog');
         if (dialog) dialog.remove();
@@ -62,7 +64,7 @@ with sync_playwright() as p:
             print("[+] Lekcja została w pełni ukończona!")
             break
 
-        ans_input = page.query_selector("input[type='text']:not([readonly])")
+        ans_input = page.query_selector("input[type='text']:not([readonly]):not([type='hidden'])")
         if not ans_input:
             print("[!] Brak pola do wpisania odpowiedzi. Lekcja dobiegła końca.")
             break
