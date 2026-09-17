@@ -1,20 +1,29 @@
 name: Lingos Daily Auto
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '30 21 * * *' # Odpala się codziennie o 23:30 czasu polskiego (okres letni)
-  workflow_dispatch: # Przycisk do ręcznego uruchomienia w dowolnym momencie
+    - cron: '0 7 * * *'
 
 jobs:
   run-lingos:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install requests beautifulsoup4
-      - run: python main.py
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run Bot
         env:
           LINGOS_USER: ${{ secrets.LINGOS_USER }}
           LINGOS_PASS: ${{ secrets.LINGOS_PASS }}
+        run: python main.py
