@@ -29,7 +29,6 @@ try:
     form = soup.find('form')
     payload = {}
     
-    # Pobieranie wszystkich ukrytych pól (w tym tokena CSRF)
     if form:
         for inp in form.find_all('input'):
             name = inp.get('name')
@@ -37,44 +36,49 @@ try:
             if name:
                 payload[name] = val
     
-    # Przypisanie loginu i hasła
     payload['login'] = USERNAME
     payload['password'] = PASSWORD
     
-    # Awaryjne sprawdzenie meta tagu z tokenem
     if '_token' not in payload or not payload['_token']:
         meta_token = soup.find('meta', {'name': 'csrf-token'}) or soup.find('meta', {'name': '_token'})
         if meta_token:
             payload['_token'] = meta_token.get('content', '')
 
-    print(f"--> Odczytane pola formularza: {list(payload.keys())}")
-    
-    print("2. Wysyłanie logowania...")
+    print("2. Logowanie do konta...")
     action_url = form.get('action') if form and form.get('action') else LOGIN_URL
     if not action_url.startswith("http"):
         action_url = "https://lingos.pl" + action_url
 
     post_res = session.post(action_url, data=payload)
-    print(f"--> Kod odpowiedzi: {post_res.status_code}")
-    print(f"--> URL po przekierowaniu: {post_res.url}")
 
     if post_res.status_code == 400:
-        print("[X] BŁĄD 400: Serwer odrzucił żądanie logowania.")
+        print("[X] BŁĄD 400: Odrzucono logowanie.")
         exit(1)
 
-    print("[OK] Zalogowano pomyślnie! Prchodzę do słówek...")
+    print("[OK] Zalogowano! Przechodzę do rozwiązywania lekcji...")
     
-    # 3. Wykonywanie lekcji
     current_url = START_URL
     dictionary = {}
+    
+    # Lista fraz kończących lekcję (dopasowana do Twojego ekranu)
+    END_PHRASES = [
+        "koniec lekcji", 
+        "gratulacje", 
+        "brak słówek", 
+        "podsumowanie", 
+        "lekcja wykonana", 
+        "dzisiaj powtórzone", 
+        "tak trzymaj",
+        "przerób jeszcze"
+    ]
     
     for step in range(100):
         page = session.get(current_url)
         soup = BeautifulSoup(page.text, 'html.parser')
         
         page_text = page.text.lower()
-        if any(term in page_text for term in ["koniec lekcji", "gratulacje", "brak słówek", "podsumowanie"]):
-            print("[+] Lekcja została w pełni ukończona!")
+        if any(term in page_text for term in END_PHRASES):
+            print("[+] Wykryto ekran końcowy: Lekcja została w pełni ukończona!")
             break
             
         step_form = soup.find('form')
@@ -118,7 +122,7 @@ try:
         if p_res.url:
             current_url = p_res.url
 
-    print("=== SUCCESS ===")
+    print("=== SUCCESS: LEKCJA ZROBIONA ===")
 
 except Exception as e:
     print(f"[X] Wystąpił błąd: {e}")
