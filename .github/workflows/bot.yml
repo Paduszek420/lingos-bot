@@ -1,13 +1,16 @@
 name: Lingos Daily Auto
 
 on:
-  schedule:
-    - cron: '30 21 * * *'
   workflow_dispatch:
+  schedule:
+    # 05:00 UTC = 07:00 czasu polskiego (w czasie letnim)
+    # W czasie zimowym godzina 7:00 w Polsce to '0 6 * * *'
+    - cron: '0 5 * * *'
 
 jobs:
   run-lingos:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -17,11 +20,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install dependencies & Playwright
         run: |
           python -m pip install --upgrade pip
-          pip install playwright
-          playwright install chromium
+          pip install playwright beautifulsoup4 requests
+          playwright install --with-deps chromium
 
       - name: Run script
         env:
@@ -33,5 +36,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lingos-screenshots
-          path: "*.png"
+          name: screenshots
+          path: '*.png'
