@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     # 05:00 UTC = 07:00 czasu polskiego (w czasie letnim)
-    # W czasie zimowym godzina 7:00 w Polsce to '0 6 * * *'
+    # 06:00 UTC = 07:00 czasu polskiego (w czasie zimowym)
     - cron: '0 5 * * *'
 
 jobs:
@@ -12,27 +12,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Pobranie repozytorium
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Konfiguracja Pythona
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies & Playwright
+      - name: Instalacja zależności i przeglądarki Chromium
         run: |
           python -m pip install --upgrade pip
           pip install playwright beautifulsoup4 requests
           playwright install --with-deps chromium
 
-      - name: Run script
+      - name: Uruchomienie skryptu
         env:
           LINGOS_USER: ${{ secrets.LINGOS_USER }}
           LINGOS_PASS: ${{ secrets.LINGOS_PASS }}
         run: python main.py
 
-      - name: Upload screenshots
+      - name: Zapisanie zrzutów ekranu w razie błędu/weryfikacji
         if: always()
         uses: actions/upload-artifact@v4
         with:
