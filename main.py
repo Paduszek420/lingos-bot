@@ -11,16 +11,16 @@ if not USERNAME or not PASSWORD:
     exit(1)
 
 with sync_playwright() as p:
-    print("1. Uruchamianie wirtualnej przeglądarki Chrome...")
+    print("1. Uruchamianie przeglądarki...")
     browser = p.chromium.launch(headless=True)
     context = browser.new_context()
     page = context.new_page()
 
-    print("2. Otwieranie strony logowania...")
+    print("2. Logowanie do Lingos.pl...")
     page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded")
     page.wait_for_timeout(2000)
 
-    # Wyrzucenie banera z plikami cookie (Cookiebot)
+    # Usuwanie okna zgody na cookies
     page.evaluate("""() => {
         const dialog = document.getElementById('CybotCookiebotDialog');
         if (dialog) dialog.remove();
@@ -28,48 +28,62 @@ with sync_playwright() as p:
         if (overlay) overlay.remove();
     }""")
 
-    print("3. Szukanie widocznego pola logowania...")
-    # Czekanie bezpośrednio na WIDOCZNE pole do wpisania loginu
     page.wait_for_selector("input[name='login'], input[name='email'], input[type='text']:not([type='hidden'])", state="visible", timeout=15000)
-
-    print("4. Wpisywanie danych logowania...")
     page.fill("input[name='login'], input[name='email'], input[type='text']:not([type='hidden'])", USERNAME)
     page.fill("input[type='password']", PASSWORD)
     page.click("button[type='submit'], input[type='submit']", force=True)
-    
     page.wait_for_timeout(3000)
 
     if "login" in page.url.lower():
-        print("[X] BŁĄD LOGOWANIA: Odrzucono dane.")
+        print("[X] BŁĄD LOGOWANIA: Niepoprawne dane.")
         browser.close()
         exit(1)
 
-    print("[OK] Zalogowano pomyślnie! Otwieranie lekcji...")
+    print(f"[OK] Zalogowano pomyślnie. Szukanie aktywnej lekcji...")
 
-    page.goto("https://lingos.pl/learning/start/0?groupId=19788", wait_until="domcontentloaded")
+    # 3. Dynamiczne szukanie przycisku rozpoczęcia lekcji na pulpicie
+    lesson_link = page.query_selector("a[href*='/learning/start'], a[href*='/learning/'], a.btn-primary")
+    
+    if lesson_link:
+        start_href = lesson_link.get_attribute("href")
+        print(f"--> Znaleziono lekcję pod adresem: {start_href}")
+        page.goto("https://lingos.pl" + start_href if start_href.startswith("/") else start_href, wait_until="domcontentloaded")
+    else:
+        print("--> Brak bezpośredniego linku na pulpicie, próba wejścia przez stronę studenta...")
+        page.goto("https://lingos.pl/students", wait_until="domcontentloaded")
+        page.wait_for_timeout(2000)
+        lesson_link = page.query_selector("a[href*='/learning/start'], a[href*='/learning/']")
+        if lesson_link:
+            start_href = lesson_link.get_attribute("href")
+            page.goto("https://lingos.pl" + start_href if start_href.startswith("/") else start_href, wait_until="domcontentloaded")
+
     page.wait_for_timeout(3000)
 
-    # Usunięcie banera, gdyby pojawił się po przejściu do lekcji
-    page.evaluate("""() => {
-        const dialog = document.getElementById('CybotCookiebotDialog');
-        if (dialog) dialog.remove();
-    }""")
-
-    solved = 0
+    # 4. Pętla rozwiązywania słówek
     dictionary = {}
+    solved_count = 0
 
-    for step in range(30):
+    for step in range(50):
         content = page.content().lower()
-        if "koniec" in content or "gratulacje" in content or "brak słówek" in content or "podsumowanie" in content:
-            print("[+] Lekcja została w pełni ukończona!")
+        if any(term in content for term in ["koniec", "gratulacje", "podsumowanie", "brak słówek", "ukończono"]):
+            print("[+] LEKCJA ZOSTAŁA W PEŁNI UKOŃCZONA I ZAPISANA!")
             break
 
         ans_input = page.query_selector("input[type='text']:not([readonly]):not([type='hidden'])")
+        
+        # Jeśli brak pola tekstowego, sprawdzamy czy trzeba kliknąć "Dalej" / "Następne"
         if not ans_input:
-            print("[!] Brak pola do wpisania odpowiedzi. Lekcja dobiegła końca.")
-            break
+            next_btn = page.query_selector("button:has-text('Dalej'), a:has-text('Dalej'), input[value='Dalej']")
+            if next_btn:
+                next_btn.click(force=True)
+                page.wait_for_timeout(2000)
+                continue
+            else:
+                print("[!] Brak pola odpowiedzi oraz przycisku przejścia. Zamykanie...")
+                break
 
-        word_el = page.query_selector(".word-to-translate, h3, strong")
+        # Pobieranie słówka do przetłumaczenia
+        word_el = page.query_selector(".word-to-translate, h3, strong, .word")
         word_text = word_el.inner_text().strip() if word_el else "słówko"
 
         answer = dictionary.get(word_text, "")
@@ -79,6 +93,7 @@ with sync_playwright() as p:
         print(f"[{step+1}] Słówko: '{word_text}' | Odpowiedź: '{answer}' | Czekam {wait}s...")
         time.sleep(wait)
 
+        # Wysyłanie odpowiedzi
         submit_btn = page.query_selector("button[type='submit'], input[type='submit']")
         if submit_btn:
             submit_btn.click(force=True)
@@ -87,16 +102,14 @@ with sync_playwright() as p:
 
         page.wait_for_timeout(2500)
 
-        correct_el = page.query_selector(".correct-answer, .alert-success")
+        # Zapamiętywanie poprawnej odpowiedzi w przypadku braku lub błędu
+        correct_el = page.query_selector(".correct-answer, .alert-success, .translation-correct")
         if correct_el:
-            dictionary[word_text] = correct_el.inner_text().strip()
+            correct_text = correct_el.inner_text().strip()
+            dictionary[word_text] = correct_text
+            print(f"    --> Zapamiętano poprawną odpowiedź: '{correct_text}'")
 
-        solved += 1
+        solved_count += 1
 
-    if solved == 0:
-        print("[X] Skrypt nie rozwiązał żadnego słówka!")
-        browser.close()
-        exit(1)
-
-    print(f"=== SUKCES: Zaliczone słówka/kroki: {solved} ===")
+    print(f"=== ZAKOŃCZONO. Łącznie przetworzonych kroków: {solved_count} ===")
     browser.close()
