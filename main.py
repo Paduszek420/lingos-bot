@@ -55,18 +55,18 @@ def run():
                 time.sleep(4)
 
             print("Rozpoczynam rozwiązywanie słówek...")
-            for i in range(1, 100):
+            for i in range(1, 150):
                 content = page.inner_text("body").lower()
                 
                 if any(kw in content for kw in ["gratulacje", "podsumowanie", "ukończono", "lekcja wykonana", "dzisiaj powtórzone"]):
                     print("[+] Lekcja zrobiona w 100%!")
                     break
 
-                # Szukamy przycisku Dalej (ekran błędu)
-                next_btn = page.locator("button, a").filter(has_text="Dalej").first
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej)
+                dalej_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
                 
-                if next_btn.is_visible(timeout=1000):
-                    # Próba zapamiętania poprawnej odpowiedzi z czerwonego boksu
+                if dalej_btn.is_visible(timeout=800):
+                    # Próba zapamiętania słówka i poprawnej odpowiedzi z ekranu błędu
                     try:
                         red_box = page.locator("div.bg-red-100, div.border-red-500, div[class*='red']").first
                         if red_box.is_visible(timeout=300):
@@ -80,26 +80,24 @@ def run():
                             if prompt_text and correct_text:
                                 dictionary[prompt_text] = correct_text
                                 print(f"[ZAPAMIĘTANO] '{prompt_text}' -> '{correct_text}'")
-                    except Exception as ex:
+                    except:
                         pass
 
-                    # Kliknięcie i wymuszenie przejścia dalej
-                    print(f"[{i}] Klikam 'Dalej'...")
+                    print(f"[{i}] Zatwierdzam ekran błędu przez Enter...")
+                    # Agresywne uderzenie w klawisz Enter, który wymusza przejście na Lingosie
+                    page.keyboard.press("Enter")
+                    time.sleep(0.5)
                     try:
-                        next_btn.click(force=True)
+                        dalej_btn.click(force=True)
                     except:
-                        page.evaluate("() => { const b = Array.from(document.querySelectorAll('button, a')).find(el => el.innerText && el.innerText.includes('Dalej')); if(b) b.click(); }")
+                        pass
                     
-                    # KLUCZOWE: Czekamy aż ekran błędu faktycznie zniknie, żeby nie wpaść w pętlę
-                    try:
-                        next_btn.wait_for(state="hidden", timeout=4000)
-                    except:
-                        time.sleep(2.0)
+                    time.sleep(1.5)
                     continue
 
-                # Standardowe pole tekstowe dla nowego słówka
+                # 2. STANDARDOWE POLE TEKSTOWE
                 text_input = page.locator("input[type='text']:not([readonly])").first
-                if text_input.is_visible(timeout=1000):
+                if text_input.is_visible(timeout=800):
                     current_word = ""
                     try:
                         word_elem = page.locator("h3, div.text-xl, div.text-2xl, div[class*='word']").first
@@ -112,7 +110,7 @@ def run():
                     print(f"[{i}] Słowo: '{current_word}' -> Wpisuję: '{answer_to_type}'")
                     
                     text_input.fill(answer_to_type)
-                    time.sleep(0.4)
+                    time.sleep(0.3)
                     text_input.press("Enter")
                     time.sleep(1.5)
                     continue
