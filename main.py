@@ -23,6 +23,15 @@ def run():
             print("=== START BOT LINGOS ===")
             page.goto("https://lingos.pl/h/login")
             
+            # Próba zamknięcia ciasteczek / zgody RODO jeśli wyskoczy
+            try:
+                cookie_btn = page.locator("button:has-text('Zgadzam się'), button:has-text('Akceptuję'), .cookie-accept, #cookie-consent")
+                if cookie_btn.count() > 0:
+                    cookie_btn.first.click()
+                    print("Zamknięto okienko ciasteczek.")
+            except:
+                pass
+
             print("Wpisywanie danych logowania...")
             page.fill("input[name='login']", USERNAME)
             page.fill("input[name='password']", PASSWORD)
