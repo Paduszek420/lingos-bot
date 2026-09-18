@@ -72,22 +72,27 @@ def run():
                 word_elem = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
                 current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (przycisk Dalej)
-                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
-                if next_btn.is_visible(timeout=800):
-                    red_box = page.locator(".bg-red-100, .border-red-500, div:has-text('BŁĘDNA ODPOWIEDŹ')").first
-                    if red_box.is_visible(timeout=300):
-                        correct_text = red_box.inner_text().replace("BŁĘDNA ODPOWIEDŹ", "").strip()
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (czerwona ramka)
+                red_box = page.locator("div.bg-red-100, div.border-red-500, div:has-text('BŁĘDNA ODPOWIEDŹ')").first
+                if red_box.isVisible(timeout=800):
+                    correct_text_elem = page.locator("div.bg-red-100 span, div.border-red-500 span, .text-red-700, div:has-text('BŁĘDNA ODPOWIEDŹ') + div").first
+                    if correct_text_elem.isVisible():
+                        correct_text = correct_text_elem.inner_text().strip()
                         if current_word and correct_text:
                             dictionary[current_word] = correct_text
                             print(f"Zapamiętano do słownika: '{current_word}' -> '{correct_text}'")
                     
+                    # Agresywne kliknięcie zielonego przycisku Dalej
                     try:
-                        next_btn.click()
+                        page.locator("button:has-text('Dalej')").first.click(timeout=2000)
                     except:
-                        pass
+                        try:
+                            page.evaluate("document.querySelector('button.btn-success, button:not([disabled])').click();")
+                        except:
+                            pass
+                    
                     page.keyboard.press("Enter")
-                    time.sleep(1.0)
+                    time.sleep(1.5)
                     continue
 
                 # 2. OBSŁUGA POLA TEKSTOWEGO (Wpisywanie odpowiedzi)
@@ -97,7 +102,7 @@ def run():
                     text_input.fill(answer_to_type)
                     time.sleep(0.3)
                     text_input.press("Enter")
-                    time.sleep(1.2)
+                    time.sleep(1.5)
                     continue
 
                 # 3. OBSŁUGA KAFELKÓW (Wielokrotny wybór)
@@ -105,7 +110,7 @@ def run():
                 if options.count() > 0:
                     try:
                         options.first.click()
-                        time.sleep(1.2)
+                        time.sleep(1.5)
                     except:
                         pass
 
