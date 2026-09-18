@@ -72,8 +72,8 @@ def run():
                 word_elem = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
                 current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (czerwona ramka i przycisk Dalej)
-                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), text=Dalej").first
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (przycisk Dalej)
+                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
                 if next_btn.is_visible(timeout=800):
                     red_box = page.locator(".bg-red-100, .border-red-500, div:has-text('BŁĘDNA ODPOWIEDŹ')").first
                     if red_box.is_visible(timeout=300):
@@ -82,7 +82,6 @@ def run():
                             dictionary[current_word] = correct_text
                             print(f"Zapamiętano do słownika: '{current_word}' -> '{correct_text}'")
                     
-                    # Klikamy przycisk Dalej i naciskamy Enter
                     try:
                         next_btn.click()
                     except:
@@ -94,7 +93,6 @@ def run():
                 # 2. OBSŁUGA POLA TEKSTOWEGO (Wpisywanie odpowiedzi)
                 text_input = page.locator("input[type='text']:not([readonly])").first
                 if text_input.is_visible(timeout=1500):
-                    # Sprawdzamy czy mamy już to słowo w słowniku, jak nie to wpisujemy "a"
                     answer_to_type = dictionary.get(current_word, "a")
                     text_input.fill(answer_to_type)
                     time.sleep(0.3)
