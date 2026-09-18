@@ -24,7 +24,7 @@ def run():
             page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded")
             time.sleep(2)
 
-            # BRUTALNE USUNIĘCIE CIASTECZEK Z DOM (żeby w ogóle nie istniały na ekranie)
+            # Usunięcie baneru ciasteczek
             try:
                 page.evaluate("document.getElementById('CybotCookiebotDialog')?.remove();")
                 page.evaluate("document.querySelector('.cybot-cookiebot')?.remove();")
@@ -32,7 +32,7 @@ def run():
             except:
                 pass
 
-            # Wpisanie loginu i hasła
+            # Logowanie
             print("Wpisuję dane logowania...")
             login_input = page.locator("input[type='email'], input[type='text'], input[placeholder*='Email']").first
             login_input.wait_for(state="visible", timeout=15000)
@@ -44,19 +44,31 @@ def run():
             submit_btn = page.locator("button:has-text('Zaloguj się'), button[type='submit']").first
             submit_btn.click()
             
-            print("Czekam na zalogowanie...")
+            print("Czekam na zalogowanie i przejście do pulpitu...")
             page.wait_for_load_state("networkidle")
-            time.sleep(3)
+            time.sleep(4)
 
-            # Przejście do lekcji
-            target_url = "https://lingos.pl/learning/start/0?groupId=19788"
-            print(f"Otwieram lekcję: {target_url}")
-            page.goto(target_url, wait_until="domcontentloaded")
-            time.sleep(3)
+            # Kliknięcie w przycisk "Ucz się" na pulpicie
+            print("Szukam przycisku 'Ucz się'...")
+            try:
+                # Szukamy dokładnie przycisku z tekstem "Ucz się" widocznego na screenie
+                learn_btn = page.locator("button:has-text('Ucz się'), a:has-text('Ucz się')").first
+                if learn_btn.is_visible(timeout=5000):
+                    learn_btn.click()
+                    print("Kliknięto przycisk 'Ucz się'!")
+                    time.sleep(3)
+                else:
+                    print("[i] Nie znaleziono przycisku, wchodzę pod /learning")
+                    page.goto("https://lingos.pl/learning", wait_until="domcontentloaded")
+                    time.sleep(3)
+            except Exception as e:
+                print(f"[i] Problem z przyciskiem: {e}, wchodzę bezpośrednio.")
+                page.goto("https://lingos.pl/learning", wait_until="domcontentloaded")
+                time.sleep(3)
 
             # Pętla wykonująca słówka
             solved = 0
-            for i in range(1, 120):
+            for i in range(1, 150):
                 content = page.inner_text("body").lower()
                 
                 if any(kw in content for kw in ["gratulacje", "podsumowanie", "ukończono", "lekcja wykonana", "dzisiaj powtórzone"]):
@@ -78,7 +90,7 @@ def run():
                         solved += 1
                         time.sleep(1.2)
 
-                # Przycisk Dalej
+                # Przycisk Dalej / Sprawdź
                 try:
                     next_btn = page.locator("button:has-text('Dalej'), button:has-text('Sprawdź'), a:has-text('Dalej')")
                     if next_btn.count() > 0:
@@ -88,6 +100,7 @@ def run():
                     pass
 
             print(f"=== ZROBIONE! Przerobiono elementów: {solved} ===")
+            page.screenshot(path="final_success.png")
 
         except Exception as e:
             print(f"[X] Wystąpił błąd podczas sesji: {e}")
