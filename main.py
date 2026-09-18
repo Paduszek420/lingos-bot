@@ -72,10 +72,14 @@ def run():
                 word_elem = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
                 current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (przycisk Dalej)
-                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
-                if next_btn.is_visible(timeout=800):
-                    # Próba wyciągnięcia poprawnej odpowiedzi z czerwonej ramki
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej)
+                has_next = page.evaluate("""() => {
+                    const buttons = Array.from(document.querySelectorAll('button, a'));
+                    return buttons.some(b => b.innerText.includes('Dalej'));
+                }""")
+
+                if has_next:
+                    # Wyciąganie poprawnej odpowiedzi z czerwonej ramki
                     try:
                         red_box = page.locator("div.bg-red-100, div.border-red-500").first
                         if red_box.is_visible(timeout=300):
@@ -86,11 +90,13 @@ def run():
                     except:
                         pass
                     
-                    # Klikamy przycisk Dalej
-                    try:
-                        next_btn.click()
-                    except:
-                        pass
+                    # Bezwzględne kliknięcie przycisku "Dalej" przez JavaScript
+                    page.evaluate("""() => {
+                        const buttons = Array.from(document.querySelectorAll('button, a'));
+                        const btn = buttons.find(b => b.innerText.includes('Dalej'));
+                        if (btn) btn.click();
+                    }""")
+                    
                     page.keyboard.press("Enter")
                     time.sleep(1.5)
                     continue
