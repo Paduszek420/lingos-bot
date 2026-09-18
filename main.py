@@ -22,30 +22,25 @@ def run():
         try:
             print("=== START SESJI LINGOS ===")
             page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded")
-            
-            # 1. Akceptacja ciasteczek
+            time.sleep(2)
+
+            # BRUTALNE USUNIĘCIE CIASTECZEK Z DOM (żeby w ogóle nie istniały na ekranie)
             try:
-                cookie_btn = page.locator("button:has-text('Zezwól na wszystkie'), button:has-text('Zgadzam się'), #CybotCookiebotDialogBodyButtonAccept")
-                if cookie_btn.count() > 0:
-                    cookie_btn.first.click()
-                    print("Ciasteczka zaakceptowane.")
-                    time.sleep(1)
+                page.evaluate("document.getElementById('CybotCookiebotDialog')?.remove();")
+                page.evaluate("document.querySelector('.cybot-cookiebot')?.remove();")
+                print("Usunięto baner ciasteczek ze strony.")
             except:
                 pass
 
-            # 2. Wpisanie loginu i hasła (poprawione selektory pasujące do ekranu logowania)
+            # Wpisanie loginu i hasła
             print("Wpisuję dane logowania...")
-            
-            # Szukanie pola e-mail / login po różnych wariantach
             login_input = page.locator("input[type='email'], input[type='text'], input[placeholder*='Email']").first
             login_input.wait_for(state="visible", timeout=15000)
             login_input.fill(USERNAME)
             
-            # Szukanie pola hasła
             pass_input = page.locator("input[type='password']").first
             pass_input.fill(PASSWORD)
             
-            # Kliknięcie przycisku "Zaloguj się"
             submit_btn = page.locator("button:has-text('Zaloguj się'), button[type='submit']").first
             submit_btn.click()
             
@@ -53,13 +48,13 @@ def run():
             page.wait_for_load_state("networkidle")
             time.sleep(3)
 
-            # 3. Przejście do lekcji
+            # Przejście do lekcji
             target_url = "https://lingos.pl/learning/start/0?groupId=19788"
             print(f"Otwieram lekcję: {target_url}")
             page.goto(target_url, wait_until="domcontentloaded")
             time.sleep(3)
 
-            # 4. Pętla wykonująca słówka
+            # Pętla wykonująca słówka
             solved = 0
             for i in range(1, 120):
                 content = page.inner_text("body").lower()
