@@ -73,42 +73,40 @@ def run():
                 current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
 
                 # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej)
-                has_next = page.evaluate("""() => {
-                    const buttons = Array.from(document.querySelectorAll('button, a'));
-                    return buttons.some(b => b.innerText.includes('Dalej'));
-                }""")
-
-                if has_next:
+                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
+                if next_btn.is_visible(timeout=1000):
                     # Wyciąganie poprawnej odpowiedzi z czerwonej ramki
                     try:
                         red_box = page.locator("div.bg-red-100, div.border-red-500").first
                         if red_box.is_visible(timeout=300):
-                            correct_text = red_box.inner_text().replace("BŁĘDNA ODPOWIEDŹ", "").strip()
+                            box_text = red_box.inner_text().replace("BŁĘDNA ODPOWIEDŹ", "").strip()
+                            lines = [l.strip() for l in box_text.split('\n') if l.strip()]
+                            correct_text = lines[-1] if lines else box_text
                             if current_word and correct_text:
                                 dictionary[current_word] = correct_text
                                 print(f"Zapamiętano do słownika: '{current_word}' -> '{correct_text}'")
                     except:
                         pass
                     
-                    # Bezwzględne kliknięcie przycisku "Dalej" przez JavaScript
-                    page.evaluate("""() => {
-                        const buttons = Array.from(document.querySelectorAll('button, a'));
-                        const btn = buttons.find(b => b.innerText.includes('Dalej'));
-                        if (btn) btn.click();
-                    }""")
+                    # Kliknięcie przycisku "Dalej"
+                    try:
+                        next_btn.click()
+                    except:
+                        page.evaluate("document.querySelector('button.btn-success, button:not([disabled])').click();")
                     
-                    page.keyboard.press("Enter")
-                    time.sleep(1.5)
+                    # KLUCZOWE: Czekamy aż ekran błędu zniknie i pojawi się pole tekstowe nowgo słówka
+                    time.sleep(2.0)
                     continue
 
                 # 2. OBSŁUGA POLA TEKSTOWEGO (Wpisywanie odpowiedzi)
                 text_input = page.locator("input[type='text']:not([readonly])").first
                 if text_input.is_visible(timeout=1500):
                     answer_to_type = dictionary.get(current_word, "a")
+                    print(f"Wpisuję słówko '{current_word}' -> '{answer_to_type}'")
                     text_input.fill(answer_to_type)
-                    time.sleep(0.3)
+                    time.sleep(0.5)
                     text_input.press("Enter")
-                    time.sleep(1.5)
+                    time.sleep(2.0) # Czekamy na odpowiedź serwera Lingos
                     continue
 
                 # 3. OBSŁUGA KAFELKÓW (Wielokrotny wybór)
