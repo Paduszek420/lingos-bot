@@ -68,62 +68,71 @@ def run():
                     print("[+] Lekcja zrobiona w 100%!")
                     break
 
-                # Pobranie aktualnego słówka do przetłumaczenia
-                word_elem = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
-                current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej)
+                has_next = page.evaluate("""() => {
+                    const buttons = Array.from(document.querySelectorAll('button, a'));
+                    return buttons.some(b => b.innerText && b.innerText.includes('Dalej'));
+                }""")
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU
-                error_box = page.locator("div:has-text('BŁĘDNA ODPOWIEDŹ'), div.border-red-500").first
-                if error_box.is_visible(timeout=1000):
-                    # Wyciąganie poprawnej odpowiedzi z czerwonej ramki
+                if has_next:
+                    # Wyciąganie słówka i poprawnej odpowiedzi z ekranu błędu
                     try:
-                        red_box = page.locator("div.bg-red-100, div.border-red-500").first
-                        if red_box.is_visible(timeout=300):
-                            box_text = red_box.inner_text().replace("BŁĘDNA ODPOWIEDŹ", "").strip()
-                            lines = [l.strip() for l in box_text.split('\n') if l.strip()]
-                            correct_text = lines[-1] if lines else box_text
-                            if current_word and correct_text:
-                                dictionary[current_word] = correct_text
-                                print(f"Zapamiętano do słownika: '{current_word}' -> '{correct_text}'")
-                    except:
-                        pass
-                    
-                    # WYMUSZENIE KLIKNIĘCIA PRZEZ CZYSTY JAVASCRIPT (szuka dowolnego elementu z tekstem Dalej)
+                        parsed_data = page.evaluate("""() => {
+                            const errDiv = document.querySelector('div.bg-red-100, div.border-red-500, div[class*="red"]');
+                            if (!errDiv) return null;
+                            const correctText = errDiv.innerText.replace('BŁĘDNA ODPOWIEDŹ', '').replace('volume_up', '').trim();
+                            
+                            // Szukamy tekstu pytania wyświetlonego nad błędem
+                            let current = errDiv.previousElementSibling;
+                            let promptText = '';
+                            while (current) {
+                                if (current.innerText && current.innerText.trim().length > 0 && !current.innerText.includes('Dalej')) {
+                                    promptText = current.innerText.trim();
+                                    break;
+                                }
+                                current = current.previousElementSibling;
+                            }
+                            return { prompt: promptText, answer: correctText.split('\\n').pop().trim() };
+                        }""")
+
+                        if parsed_data and parsed_data['prompt'] and parsed_data['answer']:
+                            p_clean = parsed_data['prompt'].replace("PRZETŁUMACZ", "").strip()
+                            dictionary[p_clean] = parsed_data['answer']
+                            print(f"[ZAPAMIĘTANO] '{p_clean}' -> '{parsed_data['answer']}'")
+                    except Exception as ex:
+                        print(f"Błąd parsowania: {ex}")
+
+                    # Kliknięcie Dalej przez JS
                     page.evaluate("""() => {
-                        const elements = Array.from(document.querySelectorAll('button, a, div'));
-                        const target = elements.find(el => el.innerText && el.innerText.includes('Dalej'));
-                        if (target) {
-                            target.click();
-                        } else {
-                            // Jeśli nie znajdzie tekstu, klika pierwszy zielony przycisk na stronie
-                            const green = document.querySelector('button.bg-green-500, button[class*="green"], .btn-success');
-                            if (green) green.click();
-                        }
+                        const buttons = Array.from(document.querySelectorAll('button, a'));
+                        const btn = buttons.find(b => b.innerText && b.innerText.includes('Dalej'));
+                        if (btn) btn.click();
                     }""")
                     
-                    print("Kliknięto 'Dalej' przez JS, czekam...")
-                    time.sleep(2.5)
-                    continue
-
-                # 2. OBSŁUGA POLA TEKSTOWEGO (Wpisywanie odpowiedzi)
-                text_input = page.locator("input[type='text']:not([readonly])").first
-                if text_input.is_visible(timeout=1500):
-                    answer_to_type = dictionary.get(current_word, "a")
-                    print(f"Wpisuję słówko '{current_word}' -> '{answer_to_type}'")
-                    text_input.fill(answer_to_type)
-                    time.sleep(0.5)
-                    text_input.press("Enter")
                     time.sleep(2.0)
                     continue
 
-                # 3. OBSŁUGA KAFELKÓW (Wielokrotny wybór)
-                options = page.locator(".answer-tile, .word-tile, div.option, button.answer-btn")
-                if options.count() > 0:
-                    try:
-                        options.first.click()
-                        time.sleep(1.5)
-                    except:
-                        pass
+                # 2. OBSŁUGA POLA TEKSTOWEGO (Standardowe pytanie)
+                text_input = page.locator("input[type='text']:not([readonly])").first
+                if text_input.is_visible(timeout=1000):
+                    # Bezpieczne pobranie słówka (omijając przyciski)
+                    current_word = page.evaluate("""() => {
+                        const candidates = Array.from(document.querySelectorAll('h3, div.text-xl, div.text-2xl, div[class*="word"]'));
+                        const valid = candidates.find(el => {
+                            const t = el.innerText;
+                            return t && !t.includes('Dalej') && !t.includes('PRZETŁUMACZ') && !t.includes('Odpowiedź') && t.length < 50;
+                        });
+                        return valid ? valid.innerText.replace('PRZETŁUMACZ', '').trim() : '';
+                    }""")
+
+                    answer_to_type = dictionary.get(current_word, "a")
+                    print(f"[{i}] Pytanie: '{current_word}' -> Wpisuję: '{answer_to_type}'")
+                    
+                    text_input.fill(answer_to_type)
+                    time.sleep(0.4)
+                    text_input.press("Enter")
+                    time.sleep(2.0)
+                    continue
 
                 time.sleep(0.5)
 
