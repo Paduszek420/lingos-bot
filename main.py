@@ -11,7 +11,6 @@ def run():
         print("[X] BŁĄD: Brak danych logowania w GitHub Secrets!")
         sys.exit(1)
 
-    # Słownik zapamiętujący poprawne odpowiedzi w trakcie sesji
     dictionary = {}
 
     with sync_playwright() as p:
@@ -61,7 +60,7 @@ def run():
 
             # Pętla do rozwiązywania słówek
             print("Rozpoczynam rozwiązywanie słówek...")
-            for i in range(1, 150):
+            for i in range(1, 100):
                 content = page.inner_text("body").lower()
                 
                 # Sprawdzenie czy to koniec lekcji
@@ -73,32 +72,37 @@ def run():
                 word_elem = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
                 current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
 
-                # Sprawdzenie czy pojawił się przycisk "Dalej" (np. po błędnej odpowiedzi)
-                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
-                if next_btn.is_visible(timeout=1000):
-                    # Jeśli widać czerwoną ramkę z poprawną odpowiedzią, zapamiętaj ją
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (czerwona ramka i przycisk Dalej)
+                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), text=Dalej").first
+                if next_btn.is_visible(timeout=800):
                     red_box = page.locator(".bg-red-100, .border-red-500, div:has-text('BŁĘDNA ODPOWIEDŹ')").first
-                    if red_box.is_visible(timeout=500):
+                    if red_box.is_visible(timeout=300):
                         correct_text = red_box.inner_text().replace("BŁĘDNA ODPOWIEDŹ", "").strip()
                         if current_word and correct_text:
                             dictionary[current_word] = correct_text
-                            print(f"Zapamiętano: '{current_word}' -> '{correct_text}'")
+                            print(f"Zapamiętano do słownika: '{current_word}' -> '{correct_text}'")
                     
-                    next_btn.click()
-                    time.sleep(1.2)
+                    # Klikamy przycisk Dalej i naciskamy Enter
+                    try:
+                        next_btn.click()
+                    except:
+                        pass
+                    page.keyboard.press("Enter")
+                    time.sleep(1.0)
                     continue
 
-                # Obsługa pola tekstowego
+                # 2. OBSŁUGA POLA TEKSTOWEGO (Wpisywanie odpowiedzi)
                 text_input = page.locator("input[type='text']:not([readonly])").first
-                if text_input.is_visible(timeout=2000):
-                    # Sprawdź czy mamy już poprawną odpowiedź w słowniku, jak nie wpisz "a" żeby poznać odpowiedź
+                if text_input.is_visible(timeout=1500):
+                    # Sprawdzamy czy mamy już to słowo w słowniku, jak nie to wpisujemy "a"
                     answer_to_type = dictionary.get(current_word, "a")
                     text_input.fill(answer_to_type)
                     time.sleep(0.3)
                     text_input.press("Enter")
                     time.sleep(1.2)
+                    continue
 
-                # Obsługa kafelków (wielokrotny wybór)
+                # 3. OBSŁUGA KAFELKÓW (Wielokrotny wybór)
                 options = page.locator(".answer-tile, .word-tile, div.option, button.answer-btn")
                 if options.count() > 0:
                     try:
@@ -106,6 +110,8 @@ def run():
                         time.sleep(1.2)
                     except:
                         pass
+
+                time.sleep(0.5)
 
             page.screenshot(path="final_success.png")
             print("=== ZAKOŃCZONO SESJĘ ===")
