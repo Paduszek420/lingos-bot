@@ -68,10 +68,10 @@ def run():
                     print("[+] Lekcja zrobiona w 100%!")
                     break
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej)
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej / Enter)
                 has_next = page.evaluate("""() => {
-                    const buttons = Array.from(document.querySelectorAll('button, a'));
-                    return buttons.some(b => b.innerText && b.innerText.includes('Dalej'));
+                    const elements = Array.from(document.querySelectorAll('button, a, div'));
+                    return elements.some(el => el.innerText && el.innerText.includes('Dalej'));
                 }""")
 
                 if has_next:
@@ -82,7 +82,6 @@ def run():
                             if (!errDiv) return null;
                             const correctText = errDiv.innerText.replace('BŁĘDNA ODPOWIEDŹ', '').replace('volume_up', '').trim();
                             
-                            // Szukamy tekstu pytania wyświetlonego nad błędem
                             let current = errDiv.previousElementSibling;
                             let promptText = '';
                             while (current) {
@@ -102,20 +101,24 @@ def run():
                     except Exception as ex:
                         print(f"Błąd parsowania: {ex}")
 
-                    # Kliknięcie Dalej przez JS
+                    # Wymuszenie kliknięcia + wysłanie klawisza Enter
                     page.evaluate("""() => {
-                        const buttons = Array.from(document.querySelectorAll('button, a'));
-                        const btn = buttons.find(b => b.innerText && b.innerText.includes('Dalej'));
-                        if (btn) btn.click();
+                        const elements = Array.from(document.querySelectorAll('button, a, div'));
+                        const btn = elements.find(el => el.innerText && el.innerText.includes('Dalej'));
+                        if (btn) {
+                            btn.click();
+                            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                        }
                     }""")
+                    page.keyboard.press("Enter")
                     
-                    time.sleep(2.0)
+                    print("Zatwierdzono błąd przez Enter/JS, czekam na nowe słówko...")
+                    time.sleep(2.5)
                     continue
 
                 # 2. OBSŁUGA POLA TEKSTOWEGO (Standardowe pytanie)
                 text_input = page.locator("input[type='text']:not([readonly])").first
                 if text_input.is_visible(timeout=1000):
-                    # Bezpieczne pobranie słówka (omijając przyciski)
                     current_word = page.evaluate("""() => {
                         const candidates = Array.from(document.querySelectorAll('h3, div.text-xl, div.text-2xl, div[class*="word"]'));
                         const valid = candidates.find(el => {
