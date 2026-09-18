@@ -72,9 +72,9 @@ def run():
                 word_elem = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
                 current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej)
-                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
-                if next_btn.is_visible(timeout=1000):
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU
+                error_box = page.locator("div:has-text('BŁĘDNA ODPOWIEDŹ'), div.border-red-500").first
+                if error_box.is_visible(timeout=1000):
                     # Wyciąganie poprawnej odpowiedzi z czerwonej ramki
                     try:
                         red_box = page.locator("div.bg-red-100, div.border-red-500").first
@@ -88,14 +88,21 @@ def run():
                     except:
                         pass
                     
-                    # Kliknięcie przycisku "Dalej"
-                    try:
-                        next_btn.click()
-                    except:
-                        page.evaluate("document.querySelector('button.btn-success, button:not([disabled])').click();")
+                    # WYMUSZENIE KLIKNIĘCIA PRZEZ CZYSTY JAVASCRIPT (szuka dowolnego elementu z tekstem Dalej)
+                    page.evaluate("""() => {
+                        const elements = Array.from(document.querySelectorAll('button, a, div'));
+                        const target = elements.find(el => el.innerText && el.innerText.includes('Dalej'));
+                        if (target) {
+                            target.click();
+                        } else {
+                            // Jeśli nie znajdzie tekstu, klika pierwszy zielony przycisk na stronie
+                            const green = document.querySelector('button.bg-green-500, button[class*="green"], .btn-success');
+                            if (green) green.click();
+                        }
+                    }""")
                     
-                    # KLUCZOWE: Czekamy aż ekran błędu zniknie i pojawi się pole tekstowe nowgo słówka
-                    time.sleep(2.0)
+                    print("Kliknięto 'Dalej' przez JS, czekam...")
+                    time.sleep(2.5)
                     continue
 
                 # 2. OBSŁUGA POLA TEKSTOWEGO (Wpisywanie odpowiedzi)
@@ -106,7 +113,7 @@ def run():
                     text_input.fill(answer_to_type)
                     time.sleep(0.5)
                     text_input.press("Enter")
-                    time.sleep(2.0) # Czekamy na odpowiedź serwera Lingos
+                    time.sleep(2.0)
                     continue
 
                 # 3. OBSŁUGA KAFELKÓW (Wielokrotny wybór)
