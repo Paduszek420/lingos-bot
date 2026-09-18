@@ -15,81 +15,88 @@ def run():
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={'width': 1280, 'height': 720},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36'
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
         )
         page = context.new_page()
 
         try:
-            print("=== START BOT LINGOS ===")
-            page.goto("https://lingos.pl/h/login", wait_until="networkidle")
+            print("=== START SESJI LINGOS ===")
+            page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded")
             
-            # KLUCZOWY KROK: Zamknięcie banera cookies z drugiego zdjęcia
+            # 1. Akceptacja ciasteczek
             try:
-                print("Szukam banera cookies...")
-                # Przycisk "Zezwól na wszystkie" lub "Zezwól" w okienku Cookiebot
-                cookie_btn = page.locator("button:has-text('Zezwól na wszystkie'), button:has-text('Zezwól'), #CybotCookiebotDialogBodyButtonAccept")
+                cookie_btn = page.locator("button:has-text('Zezwól na wszystkie'), button:has-text('Zgadzam się'), #CybotCookiebotDialogBodyButtonAccept")
                 if cookie_btn.count() > 0:
                     cookie_btn.first.click()
-                    print("Zamknięto okienko ciasteczek.")
+                    print("Ciasteczka zaakceptowane.")
                     time.sleep(1)
-            except Exception as e:
-                print(f"Nie znaleziono ciasteczek lub pominięto: {e}")
+            except:
+                pass
 
-            print("Wpisywanie danych logowania...")
-            page.wait_for_selector("input[name='login']", timeout=10000)
-            page.fill("input[name='login']", USERNAME)
-            page.fill("input[name='password']", PASSWORD)
+            # 2. Wpisanie loginu i hasła (poprawione selektory pasujące do ekranu logowania)
+            print("Wpisuję dane logowania...")
             
-            # Kliknięcie przycisku logowania
-            page.click("button[type='submit'], input[type='submit']")
+            # Szukanie pola e-mail / login po różnych wariantach
+            login_input = page.locator("input[type='email'], input[type='text'], input[placeholder*='Email']").first
+            login_input.wait_for(state="visible", timeout=15000)
+            login_input.fill(USERNAME)
+            
+            # Szukanie pola hasła
+            pass_input = page.locator("input[type='password']").first
+            pass_input.fill(PASSWORD)
+            
+            # Kliknięcie przycisku "Zaloguj się"
+            submit_btn = page.locator("button:has-text('Zaloguj się'), button[type='submit']").first
+            submit_btn.click()
+            
+            print("Czekam na zalogowanie...")
             page.wait_for_load_state("networkidle")
+            time.sleep(3)
 
-            print("[OK] Zalogowano pomyślnie!")
-
+            # 3. Przejście do lekcji
             target_url = "https://lingos.pl/learning/start/0?groupId=19788"
-            print(f"Wchodzę w lekcję: {target_url}")
-            page.goto(target_url, wait_until="networkidle")
-            time.sleep(2)
+            print(f"Otwieram lekcję: {target_url}")
+            page.goto(target_url, wait_until="domcontentloaded")
+            time.sleep(3)
 
-            solved_steps = 0
-
-            for step in range(1, 100):
-                body_text = page.inner_text("body").lower()
-                if any(w in body_text for w in ["gratulacje", "podsumowanie", "ukończono", "brak słówek", "koniec", "lekcja wykonana", "dzisiaj powtórzone"]):
-                    print("[+] Lekcja została ukończona!")
+            # 4. Pętla wykonująca słówka
+            solved = 0
+            for i in range(1, 120):
+                content = page.inner_text("body").lower()
+                
+                if any(kw in content for kw in ["gratulacje", "podsumowanie", "ukończono", "lekcja wykonana", "dzisiaj powtórzone"]):
+                    print("[+] Sesja zakończona sukcesem! Słówka zrobione.")
                     break
 
-                # Sprawdzenie kafelków odpowiedzi
-                tiles = page.locator(".answer-tile, .word-tile, .card-answer, div.option, button.answer-btn")
-                if tiles.count() > 0:
-                    print(f"[{step}] Klikam kafelek odpowiedzi.")
-                    tiles.first.click()
-                    solved_steps += 1
-                    time.sleep(1.5)
+                # Klikanie odpowiedzi (kafelki)
+                options = page.locator(".answer-tile, .word-tile, div.option, button.answer-btn, .answer")
+                if options.count() > 0:
+                    options.first.click()
+                    solved += 1
+                    time.sleep(1.2)
                 else:
-                    # Sprawdzenie pola tekstowego
-                    input_answer = page.locator("input[type='text']:not([readonly])")
-                    if input_answer.count() > 0:
-                        print(f"[{step}] Wpisuję odpowiedź.")
-                        input_answer.first.fill("a")
-                        input_answer.first.press("Enter")
-                        solved_steps += 1
-                        time.sleep(1.5)
+                    # Pole tekstowe
+                    text_input = page.locator("input[type='text']:not([readonly])")
+                    if text_input.count() > 0:
+                        text_input.first.fill("auto")
+                        text_input.first.press("Enter")
+                        solved += 1
+                        time.sleep(1.2)
 
-                # Kliknięcie Dalej / Sprawdź
+                # Przycisk Dalej
                 try:
-                    next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), button:has-text('Sprawdź')")
+                    next_btn = page.locator("button:has-text('Dalej'), button:has-text('Sprawdź'), a:has-text('Dalej')")
                     if next_btn.count() > 0:
                         next_btn.first.click()
-                        time.sleep(1)
+                        time.sleep(0.8)
                 except:
                     pass
 
-            print(f"=== ZAKOŃCZONO SUKCESEM (Kroki: {solved_steps}) ===")
+            print(f"=== ZROBIONE! Przerobiono elementów: {solved} ===")
 
         except Exception as e:
-            print(f"[X] Błąd: {e}")
-            page.screenshot(path="error.png")
+            print(f"[X] Wystąpił błąd podczas sesji: {e}")
+            page.screenshot(path="error_final.png")
             sys.exit(1)
         finally:
             browser.close()
