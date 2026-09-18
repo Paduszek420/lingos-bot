@@ -72,25 +72,25 @@ def run():
                 word_elem = page.locator("h3, .word-title, div:has-text('PRZETŁUMACZ') + div").first
                 current_word = word_elem.inner_text().strip() if word_elem.is_visible() else ""
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (czerwona ramka)
-                red_box = page.locator("div.bg-red-100, div.border-red-500, div:has-text('BŁĘDNA ODPOWIEDŹ')").first
-                if red_box.isVisible(timeout=800):
-                    correct_text_elem = page.locator("div.bg-red-100 span, div.border-red-500 span, .text-red-700, div:has-text('BŁĘDNA ODPOWIEDŹ') + div").first
-                    if correct_text_elem.isVisible():
-                        correct_text = correct_text_elem.inner_text().strip()
-                        if current_word and correct_text:
-                            dictionary[current_word] = correct_text
-                            print(f"Zapamiętano do słownika: '{current_word}' -> '{correct_text}'")
-                    
-                    # Agresywne kliknięcie zielonego przycisku Dalej
+                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (przycisk Dalej)
+                next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
+                if next_btn.is_visible(timeout=800):
+                    # Próba wyciągnięcia poprawnej odpowiedzi z czerwonej ramki
                     try:
-                        page.locator("button:has-text('Dalej')").first.click(timeout=2000)
+                        red_box = page.locator("div.bg-red-100, div.border-red-500").first
+                        if red_box.is_visible(timeout=300):
+                            correct_text = red_box.inner_text().replace("BŁĘDNA ODPOWIEDŹ", "").strip()
+                            if current_word and correct_text:
+                                dictionary[current_word] = correct_text
+                                print(f"Zapamiętano do słownika: '{current_word}' -> '{correct_text}'")
                     except:
-                        try:
-                            page.evaluate("document.querySelector('button.btn-success, button:not([disabled])').click();")
-                        except:
-                            pass
+                        pass
                     
+                    # Klikamy przycisk Dalej
+                    try:
+                        next_btn.click()
+                    except:
+                        pass
                     page.keyboard.press("Enter")
                     time.sleep(1.5)
                     continue
