@@ -9,28 +9,15 @@ USERNAME = os.environ.get("LINGOS_USER", "").strip()
 PASSWORD = os.environ.get("LINGOS_PASS", "").strip()
 
 def handle_cookies(page):
-    cookie_selectors = [
-        "#CybotCookiebotDialogBodyButtonAccept",
-        "button:has-text('Akceptuj')",
-        "button:has-text('Zgadzam się')",
-        "button:has-text('Zezwól')"
-    ]
-    for sel in cookie_selectors:
-        try:
-            btn = page.locator(sel).first
-            if btn.is_visible(timeout=500):
-                btn.click()
-                page.wait_for_timeout(300)
-                break
-        except Exception:
-            pass
-            
-    page.evaluate("""() => {
-        const dialog = document.getElementById('CybotCookiebotDialog');
-        if (dialog) dialog.remove();
-        const overlay = document.getElementById('CybotCookiebotDialogBodyUnderlay');
-        if (overlay) overlay.remove();
-    }""")
+    try:
+        page.evaluate("""() => {
+            const dialog = document.getElementById('CybotCookiebotDialog');
+            if (dialog) dialog.remove();
+            const overlay = document.getElementById('CybotCookiebotDialogBodyUnderlay');
+            if (overlay) overlay.remove();
+        }""")
+    except Exception:
+        pass
 
 def run():
     if not USERNAME or not PASSWORD:
@@ -65,52 +52,35 @@ def run():
 
             print("[OK] Zalogowano pomyślnie!")
 
-            print("Szukam przycisku 'Ucz się' na kokpicie...")
-            page.goto("https://lingos.pl/", wait_until="domcontentloaded", timeout=15000)
-            page.wait_for_timeout(2000)
+            # Bezpośrednie wejście w lekcję grupy ze zdjęcia (groupId=19788)
+            target_url = "https://lingos.pl/learning/start/0?groupId=19788"
+            print(f"Wchodzę bezpośrednio w lekcję: {target_url}")
+            page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+            page.wait_for_timeout(3000)
             handle_cookies(page)
-
-            # Kliknięcie w naukę i dłuższe czekanie, żeby załadował się panel słówek
-            learn_btn = page.locator("a:has-text('Ucz się'), button:has-text('Ucz się'), a.btn-success, a.btn-primary").first
-            if learn_btn.is_visible(timeout=4000):
-                learn_btn.click()
-                print("[OK] Kliknięto przycisk rozpoczęcia nauki!")
-                page.wait_for_timeout(4000) # Czekamy aż wejdzie w sesję
-            else:
-                print("[!] Nie znaleziono przycisku, wchodzę pod adres grup...")
-                page.goto("https://lingos.pl/students/group", wait_until="domcontentloaded", timeout=15000)
-                page.wait_for_timeout(3000)
-
-            # Jeśli jest jeszcze jakiś wewnętrzny przycisk startu zestawu w grupie - kliknij go
-            start_set_btn = page.locator("a:has-text('Rozpocznij'), button:has-text('Rozpocznij'), a:has-text('Ćwicz'), .start-lesson").first
-            if start_set_btn.is_visible(timeout=2000):
-                start_set_btn.click()
-                print("[OK] Kliknięto start zestawu słówek!")
-                page.wait_for_timeout(3000)
 
             solved_steps = 0
 
-            # Właściwa pętla rozwiązywania
-            for step in range(1, 80):
+            # Główna pętla przerabiania słówek
+            for step in range(1, 120):
                 time.sleep(random.uniform(1.5, 2.5))
                 handle_cookies(page)
 
                 body_text = page.inner_text("body").lower()
-                if any(w in body_text for w in ["gratulacje", "podsumowanie", "ukończono", "brak słówek do powtórki"]):
+                if any(w in body_text for w in ["gratulacje", "podsumowanie", "ukończono", "brak słówek do powtórki", "koniec"]):
                     print("[+] Lekcja została w pełni ukończona!")
                     break
 
-                # Szukamy słówka do przetłumaczenia
-                word_el = page.locator("h3, .word-title, div.word-to-translate, .card-title, label").first
+                # Pobieranie słówka do przetłumaczenia
+                word_el = page.locator("h3, .word-title, div.word-to-translate, .card-title, label, .text-center h4").first
                 current_word = ""
                 if word_el.is_visible(timeout=1000):
                     current_word = word_el.inner_text().strip()
 
-                # Szukamy pola tekstowego na odpowiedź
+                # Pole do wpisania odpowiedzi
                 input_answer = page.locator("input[placeholder*='odpowiedź'], input[placeholder*='Odpowiedź'], input[type='text']:not([readonly])").first
 
                 if input_answer.is_visible(timeout=1500) and current_word:
-                    # Bierzemy zapamiętaną odpowiedź lub wpisujemy domyślną, jeśli nie znamy
                     answer_to_type = dictionary.get(current_word, "a")
                     
                     input_answer.fill("")
@@ -121,11 +91,11 @@ def run():
                     print(f"[{step}] Słówko: '{current_word}' -> Wpisano: '{answer_to_type}'")
                     page.wait_for_timeout(1500)
 
-                # Sprawdzamy przycisk Dalej / zatwierdzenia
+                # Przycisk Dalej / zatwierdzenia odpowiedzi
                 next_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej'), button:has-text('Sprawdź')").first
                 if next_btn.is_visible(timeout=1000):
-                    # Jeśli odpowiedź była zła, wyciągnij poprawną z czerwonego/zielonego boxa
-                    correct_box = page.locator(".alert-danger, .text-danger, .correct-answer, .bg-red-100, .border-red-500").first
+                    # Sprawdzamy czy wyrzuciło błąd i podświetliło poprawną odpowiedź
+                    correct_box = page.locator(".alert-danger, .text-danger, .correct-answer, .bg-red-100, .border-red-500, span.text-success").first
                     if correct_box.is_visible(timeout=300):
                         box_text = correct_box.inner_text().strip()
                         lines = [l.strip() for l in box_text.split('\n') if l.strip()]
