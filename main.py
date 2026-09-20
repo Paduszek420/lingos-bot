@@ -10,10 +10,6 @@ PASSWORD = os.environ.get("LINGOS_PASS", "").strip()
 
 MAX_ROUNDS = 300
 
-# Jeżeli dokładnie to samo słowo pojawi się kilka razy z rzędu,
-# uznajemy, że Lingos się zapętlił.
-MAX_REPEATED_PROMPT = 3
-
 
 def visible(locator):
     try:
@@ -97,6 +93,36 @@ def print_page_state(page, prefix=""):
     print()
 
 
+def find_text_input(page):
+    """
+    Najważniejsze:
+    Szukamy pola odpowiedzi PRZED przyciskiem "Dalej".
+    """
+
+    selectors = [
+        "input[placeholder='Twoja odpowiedź']:not([readonly]):not([disabled])",
+        "input[placeholder*='Twoja odpowiedź']:not([readonly]):not([disabled])",
+        "input[type='text']:not([readonly]):not([disabled])",
+        "input:not([type]):not([readonly]):not([disabled])",
+        "textarea:not([readonly]):not([disabled])",
+    ]
+
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+
+            for i in range(locator.count()):
+                element = locator.nth(i)
+
+                if element.is_visible():
+                    return element
+
+        except Exception:
+            pass
+
+    return None
+
+
 def find_next_button(page):
     selectors = [
         "button:has-text('Dalej')",
@@ -124,39 +150,20 @@ def find_next_button(page):
     return None
 
 
-def find_text_input(page):
-    selectors = [
-        "input[type='text']:not([readonly]):not([disabled])",
-        "input:not([type]):not([readonly]):not([disabled])",
-        "textarea:not([readonly]):not([disabled])",
-    ]
-
-    for selector in selectors:
-        try:
-            locator = page.locator(selector)
-
-            for i in range(locator.count()):
-                element = locator.nth(i)
-
-                if element.is_visible():
-                    return element
-
-        except Exception:
-            pass
-
-    return None
-
-
 def get_current_prompt(page):
+    """
+    Próbuje znaleźć aktualne polskie słowo/zwrot.
+    """
+
     selectors = [
+        "[class*='word']",
+        "[class*='question']",
         "h1",
         "h2",
         "h3",
-        "[class*='text-xl']",
-        "[class*='text-2xl']",
         "[class*='text-3xl']",
-        "[class*='word']",
-        "[class*='question']",
+        "[class*='text-2xl']",
+        "[class*='text-xl']",
     ]
 
     ignored = {
@@ -167,13 +174,18 @@ def get_current_prompt(page):
         "kontynuuj",
         "next",
         "continue",
+        "twoja odpowiedź",
     }
 
     for selector in selectors:
+
         try:
             locator = page.locator(selector)
 
-            for i in range(min(locator.count(), 10)):
+            count = min(locator.count(), 20)
+
+            for i in range(count):
+
                 element = locator.nth(i)
 
                 if not element.is_visible():
@@ -200,6 +212,10 @@ def get_current_prompt(page):
 
 
 def extract_correct_answer(page):
+    """
+    Próbuje znaleźć poprawną odpowiedź po błędnym tłumaczeniu.
+    """
+
     selectors = [
         "div.bg-red-100",
         "div.border-red-500",
@@ -210,10 +226,12 @@ def extract_correct_answer(page):
     ]
 
     for selector in selectors:
+
         try:
             locator = page.locator(selector)
 
             for i in range(locator.count()):
+
                 element = locator.nth(i)
 
                 if not element.is_visible():
@@ -225,7 +243,7 @@ def extract_correct_answer(page):
                     continue
 
                 lines = [
-                    line.strip()
+                    " ".join(line.split())
                     for line in text.splitlines()
                     if line.strip()
                 ]
@@ -233,18 +251,25 @@ def extract_correct_answer(page):
                 cleaned = []
 
                 for line in lines:
+
                     low = line.lower()
 
                     if "błędna odpowiedź" in low:
                         continue
 
+                    if "poprawna odpowiedź" in low:
+                        continue
+
                     if "incorrect" in low:
+                        continue
+
+                    if "correct answer" in low:
                         continue
 
                     if "volume_up" in low:
                         continue
 
-                    if line.lower() == "dalej":
+                    if low == "dalej":
                         continue
 
                     cleaned.append(line)
@@ -273,20 +298,21 @@ def is_completion_screen(page):
         "sesja zakończona",
     ]
 
-    for word in completion_words:
-        if word in text:
-            return True
-
-    return False
+    return any(word in text for word in completion_words)
 
 
 def click_next_and_wait(page):
+    """
+    Klikamy "Dalej" tylko wtedy, gdy nie ma już pola odpowiedzi.
+    """
+
     button = find_next_button(page)
 
     if button is None:
         return False
 
     try:
+
         before_url = page.url
         before_body = body_text(page)
 
@@ -298,21 +324,18 @@ def click_next_and_wait(page):
         deadline = time.time() + 5
 
         while time.time() < deadline:
+
             time.sleep(0.25)
 
-            # Najpierw sprawdzamy, czy pojawił się ekran końcowy.
             if is_completion_screen(page):
                 print("[OK] Wykryto ekran zakończenia.")
                 return True
 
-            after_url = page.url
-            after_body = body_text(page)
-
-            if after_url != before_url:
+            if page.url != before_url:
                 print("[OK] URL zmienił się.")
                 return True
 
-            if after_body != before_body:
+            if body_text(page) != before_body:
                 print("[OK] Zawartość strony zmieniła się.")
                 return True
 
@@ -322,39 +345,54 @@ def click_next_and_wait(page):
 
         print("[!] Po kliknięciu 'Dalej' ekran się nie zmienił.")
 
-        try:
-            page.keyboard.press("Enter")
-            time.sleep(2)
-
-            if is_completion_screen(page):
-                print("[OK] Enter doprowadził do zakończenia.")
-                return True
-
-            if find_text_input(page) is not None:
-                print("[OK] Enter przeszedł do następnego zadania.")
-                return True
-
-        except Exception:
-            pass
-
         return False
 
     except Exception as e:
+
         print(f"[!] Błąd kliknięcia 'Dalej': {e}")
+
+        return False
+
+
+def submit_answer(page, text_input, answer):
+    """
+    Wpisuje odpowiedź i zatwierdza ją.
+    """
+
+    try:
+
+        text_input.fill(answer)
+
+        print(f"[INFO] Wpisuję odpowiedź: '{answer}'")
+
+        try:
+            text_input.press("Enter")
+        except Exception:
+            page.keyboard.press("Enter")
+
+        time.sleep(1.5)
+
+        return True
+
+    except Exception as e:
+
+        print(f"[!] Nie udało się wysłać odpowiedzi: {e}")
+
         return False
 
 
 def run():
 
     if not USERNAME or not PASSWORD:
-        print("[X] BŁĄD: Brak LINGOS_USER lub LINGOS_PASS w GitHub Secrets!")
+
+        print(
+            "[X] BŁĄD: Brak LINGOS_USER lub LINGOS_PASS "
+            "w GitHub Secrets!"
+        )
+
         sys.exit(1)
 
     dictionary = {}
-
-    # Zabezpieczenie przed zapętleniem.
-    last_prompt = ""
-    repeated_prompt_count = 0
 
     with sync_playwright() as p:
 
@@ -398,8 +436,8 @@ def run():
 
             time.sleep(2)
 
-            # Cookiebot
             try:
+
                 page.evaluate(
                     """
                     document.getElementById(
@@ -407,6 +445,7 @@ def run():
                     )?.remove();
                     """
                 )
+
             except Exception:
                 pass
 
@@ -447,12 +486,17 @@ def run():
             print("[3] Czekam na zalogowanie...")
 
             try:
+
                 page.wait_for_load_state(
                     "networkidle",
                     timeout=15000
                 )
+
             except PlaywrightTimeoutError:
-                print("[!] networkidle timeout — kontynuuję.")
+
+                print(
+                    "[!] networkidle timeout — kontynuuję."
+                )
 
             time.sleep(3)
 
@@ -479,10 +523,12 @@ def run():
                 learn_button.click()
 
                 try:
+
                     page.wait_for_load_state(
                         "networkidle",
                         timeout=10000
                     )
+
                 except PlaywrightTimeoutError:
                     pass
 
@@ -491,8 +537,8 @@ def run():
             else:
 
                 print(
-                    "[INFO] Nie znaleziono przycisku 'Ucz się'. "
-                    "Otwieram /learning..."
+                    "[INFO] Nie znaleziono przycisku "
+                    "'Ucz się'. Otwieram /learning..."
                 )
 
                 page.goto(
@@ -521,17 +567,14 @@ def run():
             print("      ROZPOCZYNAM NAUKĘ")
             print("======================================")
 
-            last_body = ""
             stuck_counter = 0
             completed = False
 
             for i in range(1, MAX_ROUNDS + 1):
 
-                current_body = body_text(page)
-
-                # ==================================================
-                # ZAKOŃCZENIE
-                # ==================================================
+                # --------------------------------------------------
+                # 1. NAJPIERW SPRAWDZAMY ZAKOŃCZENIE
+                # --------------------------------------------------
 
                 if is_completion_screen(page):
 
@@ -543,9 +586,75 @@ def run():
                     completed = True
                     break
 
-                # ==================================================
-                # EKRAN "DALEJ"
-                # ==================================================
+                # --------------------------------------------------
+                # 2. NAJWAŻNIEJSZE:
+                #    JEŻELI JEST POLE "TWOJA ODPOWIEDŹ",
+                #    TO OBSŁUGUJEMY JE PIERWSZE.
+                #
+                #    NIE WOLNO WTEDY KLIKAĆ "DALEJ".
+                # --------------------------------------------------
+
+                text_input = find_text_input(page)
+
+                if text_input is not None:
+
+                    current_word = get_current_prompt(page)
+
+                    print()
+                    print(
+                        f"[{i}] EKRAN ODPOWIEDZI"
+                    )
+
+                    print(
+                        f"[{i}] Aktualne słowo: "
+                        f"'{current_word}'"
+                    )
+
+                    # --------------------------------------------------
+                    # ZNANA ODPOWIEDŹ
+                    # --------------------------------------------------
+
+                    if current_word and current_word in dictionary:
+
+                        answer = dictionary[current_word]
+
+                        print(
+                            f"[{i}] Znalazłem zapamiętaną "
+                            f"odpowiedź: '{answer}'"
+                        )
+
+                    else:
+
+                        # Pierwszy kontakt z nowym słowem.
+                        # Pusta odpowiedź powoduje pokazanie poprawnej
+                        # odpowiedzi przez Lingos.
+                        answer = ""
+
+                        print(
+                            f"[{i}] Nie znam jeszcze odpowiedzi."
+                        )
+
+                    success = submit_answer(
+                        page,
+                        text_input,
+                        answer
+                    )
+
+                    if not success:
+
+                        stuck_counter += 1
+
+                    else:
+
+                        stuck_counter = 0
+
+                    time.sleep(0.5)
+
+                    continue
+
+                # --------------------------------------------------
+                # 3. DOPIERO TERAZ SPRAWDZAMY "DALEJ"
+                # --------------------------------------------------
 
                 next_button = find_next_button(page)
 
@@ -553,66 +662,14 @@ def run():
 
                     print()
                     print(
-                        f"[{i}] Wykryto ekran z przyciskiem "
-                        f"'Dalej'."
+                        f"[{i}] EKRAN Z PRZYCISKIEM 'DALEJ'."
                     )
 
                     prompt = get_current_prompt(page)
                     correct = extract_correct_answer(page)
 
                     # --------------------------------------------------
-                    # ZABEZPIECZENIE PRZED ZAPĘTLENIEM
-                    # --------------------------------------------------
-
-                    if prompt:
-
-                        normalized_prompt = " ".join(
-                            prompt.lower().split()
-                        )
-
-                        normalized_last = " ".join(
-                            last_prompt.lower().split()
-                        )
-
-                        if normalized_prompt == normalized_last:
-
-                            repeated_prompt_count += 1
-
-                        else:
-
-                            last_prompt = prompt
-                            repeated_prompt_count = 1
-
-                        print(
-                            f"[INFO] Powtórzenie słowa: "
-                            f"{repeated_prompt_count}/"
-                            f"{MAX_REPEATED_PROMPT}"
-                        )
-
-                        if repeated_prompt_count >= MAX_REPEATED_PROMPT:
-
-                            print()
-                            print(
-                                "[!] WYKRYTO ZAPĘTLENIE."
-                            )
-
-                            print(
-                                f"[!] To samo słowo "
-                                f"'{prompt}' pojawiło się "
-                                f"{repeated_prompt_count} razy "
-                                f"z rzędu."
-                            )
-
-                            print(
-                                "[+] Kończę sesję, żeby bot "
-                                "nie wykonywał w kółko tego samego."
-                            )
-
-                            completed = True
-                            break
-
-                    # --------------------------------------------------
-                    # ZAPIS ODPOWIEDZI
+                    # ZAPAMIĘTANIE POPRAWNEJ ODPOWIEDZI
                     # --------------------------------------------------
 
                     if prompt and correct:
@@ -631,6 +688,13 @@ def run():
                             f"{correct}"
                         )
 
+                    else:
+
+                        print(
+                            "[INFO] Nie udało się odczytać "
+                            "poprawnej odpowiedzi."
+                        )
+
                     # --------------------------------------------------
                     # KLIKNIĘCIE DALEJ
                     # --------------------------------------------------
@@ -646,21 +710,16 @@ def run():
                             f"({stuck_counter}/3)."
                         )
 
-                        screenshot(
-                            page,
-                            f"stuck_{i}.png"
-                        )
-
-                        print_page_state(
-                            page,
-                            f"ZAWIESZENIE {i}"
-                        )
-
                         if stuck_counter >= 3:
 
-                            print(
-                                "[X] Trzykrotnie nie udało "
-                                "się przejść dalej."
+                            screenshot(
+                                page,
+                                f"stuck_{i}.png"
+                            )
+
+                            print_page_state(
+                                page,
+                                f"ZAWIESZENIE {i}"
                             )
 
                             raise RuntimeError(
@@ -672,104 +731,20 @@ def run():
 
                         stuck_counter = 0
 
-                    time.sleep(1)
+                    time.sleep(0.7)
 
                     continue
 
-                # ==================================================
-                # POLE ODPOWIEDZI
-                # ==================================================
+                # --------------------------------------------------
+                # 4. NIEZNANY EKRAN
+                # --------------------------------------------------
 
-                text_input = find_text_input(page)
-
-                if text_input is not None:
-
-                    current_word = get_current_prompt(page)
-
-                    print()
-                    print(
-                        f"[{i}] Aktualne słowo: "
-                        f"'{current_word}'"
-                    )
-
-                    # Nowe słowo = resetujemy licznik zapętlenia.
-                    if current_word:
-
-                        normalized_current = " ".join(
-                            current_word.lower().split()
-                        )
-
-                        normalized_last = " ".join(
-                            last_prompt.lower().split()
-                        )
-
-                        if normalized_current != normalized_last:
-
-                            repeated_prompt_count = 0
-
-                    # --------------------------------------------------
-                    # ZNANA ODPOWIEDŹ
-                    # --------------------------------------------------
-
-                    if current_word in dictionary:
-
-                        answer = dictionary[current_word]
-
-                        print(
-                            f"[{i}] Znaleziona odpowiedź: "
-                            f"'{answer}'"
-                        )
-
-                        text_input.fill(answer)
-
-                    # --------------------------------------------------
-                    # NIEZNANA ODPOWIEDŹ
-                    # --------------------------------------------------
-
-                    else:
-
-                        print(
-                            f"[{i}] Nie znam jeszcze odpowiedzi."
-                        )
-
-                        text_input.fill("")
-
-                    # --------------------------------------------------
-                    # ZATWIERDZENIE
-                    # --------------------------------------------------
-
-                    try:
-
-                        text_input.press("Enter")
-
-                    except Exception:
-
-                        try:
-                            page.keyboard.press("Enter")
-                        except Exception:
-                            pass
-
-                    time.sleep(1.5)
-
-                    continue
-
-                # ==================================================
-                # NIEZNANY EKRAN
-                # ==================================================
-
-                if current_body == last_body:
-
-                    stuck_counter += 1
-
-                else:
-
-                    stuck_counter = 0
-
-                last_body = current_body
-
+                print()
                 print(
                     f"[{i}] Nie rozpoznano aktualnego ekranu."
                 )
+
+                stuck_counter += 1
 
                 if stuck_counter >= 5:
 
@@ -809,15 +784,13 @@ def run():
 
             if completed:
 
-                print(
-                    "   SESJA ZAKOŃCZONA"
-                )
+                print("       SESJA ZAKOŃCZONA")
 
             else:
 
                 print(
-                    "   Osiągnięto limit prób "
-                    f"({MAX_ROUNDS})"
+                    "       Osiągnięto limit "
+                    f"{MAX_ROUNDS} rund"
                 )
 
             print("======================================")
@@ -837,8 +810,6 @@ def run():
 
                 print("  Brak.")
 
-            # Jeżeli doszliśmy do limitu 300,
-            # GitHub Actions ma pokazać błąd.
             if not completed:
 
                 sys.exit(1)
