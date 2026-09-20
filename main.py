@@ -1,131 +1,751 @@
 import os
 import sys
 import time
-from playwright.sync_api import sync_playwright
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
 
 USERNAME = os.environ.get("LINGOS_USER", "").strip()
 PASSWORD = os.environ.get("LINGOS_PASS", "").strip()
 
+MAX_ROUNDS = 300
+
+
+def visible(locator):
+    try:
+        return locator.count() > 0 and locator.first.is_visible()
+    except Exception:
+        return False
+
+
+def body_text(page):
+    try:
+        return page.locator("body").inner_text()
+    except Exception:
+        return ""
+
+
+def screenshot(page, name):
+    try:
+        page.screenshot(path=name, full_page=True)
+        print(f"[SCREENSHOT] {name}")
+    except Exception as e:
+        print(f"[!] Nie udało się zrobić screenshotu: {e}")
+
+
+def get_buttons(page):
+    result = []
+
+    try:
+        buttons = page.locator("button").all()
+
+        for i, button in enumerate(buttons):
+            try:
+                if button.is_visible():
+                    text = button.inner_text().strip().replace("\n", " ")
+                    if text:
+                        result.append((i, text))
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+
+    return result
+
+
+def print_page_state(page, prefix=""):
+    print()
+    print(f"========== {prefix} ==========")
+    print("URL:", page.url)
+
+    try:
+        print("TITLE:", page.title())
+    except Exception:
+        pass
+
+    print("PRZYCISKI:")
+
+    for number, text in get_buttons(page):
+        print(f"  [{number}] {text}")
+
+    try:
+        inputs = page.locator("input").all()
+
+        print("INPUTY:")
+
+        for i, inp in enumerate(inputs):
+            try:
+                if inp.is_visible():
+                    print(
+                        f"  [{i}] "
+                        f"type={inp.get_attribute('type')} "
+                        f"placeholder={inp.get_attribute('placeholder')}"
+                    )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    print("================================")
+    print()
+
+
+def find_next_button(page):
+    selectors = [
+        "button:has-text('Dalej')",
+        "a:has-text('Dalej')",
+        "button:has-text('Kontynuuj')",
+        "button:has-text('Następne')",
+        "button:has-text('Następny')",
+        "button:has-text('Next')",
+        "button:has-text('Continue')",
+    ]
+
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+
+            for i in range(locator.count()):
+                element = locator.nth(i)
+
+                if element.is_visible():
+                    return element
+        except Exception:
+            pass
+
+    return None
+
+
+def find_text_input(page):
+    selectors = [
+        "input[type='text']:not([readonly]):not([disabled])",
+        "input:not([type]):not([readonly]):not([disabled])",
+        "textarea:not([readonly]):not([disabled])",
+    ]
+
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+
+            for i in range(locator.count()):
+                element = locator.nth(i)
+
+                if element.is_visible():
+                    return element
+        except Exception:
+            pass
+
+    return None
+
+
+def get_current_prompt(page):
+    """
+    Próbuje znaleźć słowo/tekst, który trzeba przetłumaczyć.
+    Nie zakładamy jednej konkretnej klasy CSS.
+    """
+
+    selectors = [
+        "h1",
+        "h2",
+        "h3",
+        "[class*='text-xl']",
+        "[class*='text-2xl']",
+        "[class*='text-3xl']",
+        "[class*='word']",
+        "[class*='question']",
+    ]
+
+    ignored = {
+        "przetłumacz",
+        "tłumaczenie",
+        "dalej",
+        "sprawdź",
+        "kontynuuj",
+        "next",
+        "continue",
+    }
+
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+
+            for i in range(min(locator.count(), 10)):
+                element = locator.nth(i)
+
+                if not element.is_visible():
+                    continue
+
+                text = element.inner_text().strip()
+                text = " ".join(text.split())
+
+                if not text:
+                    continue
+
+                if text.lower() in ignored:
+                    continue
+
+                if len(text) > 150:
+                    continue
+
+                return text
+
+        except Exception:
+            pass
+
+    return ""
+
+
+def extract_correct_answer(page):
+    """
+    Próbuje odczytać poprawną odpowiedź z ekranu błędu.
+    """
+
+    selectors = [
+        "div.bg-red-100",
+        "div.border-red-500",
+        "[class*='red-100']",
+        "[class*='border-red']",
+        "[class*='incorrect']",
+        "[class*='error']",
+    ]
+
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+
+            for i in range(locator.count()):
+                element = locator.nth(i)
+
+                if not element.is_visible():
+                    continue
+
+                text = element.inner_text().strip()
+
+                if not text:
+                    continue
+
+                lines = [
+                    line.strip()
+                    for line in text.splitlines()
+                    if line.strip()
+                ]
+
+                # Usuwamy typowe nagłówki
+                cleaned = []
+
+                for line in lines:
+                    low = line.lower()
+
+                    if "błędna odpowiedź" in low:
+                        continue
+
+                    if "incorrect" in low:
+                        continue
+
+                    if "volume_up" in low:
+                        continue
+
+                    if line.lower() == "dalej":
+                        continue
+
+                    cleaned.append(line)
+
+                if cleaned:
+                    return cleaned[-1]
+
+        except Exception:
+            pass
+
+    return ""
+
+
+def click_next_and_wait(page):
+    """
+    Kliknięcie Dalej + sprawdzenie, czy strona faktycznie ruszyła.
+    """
+
+    button = find_next_button(page)
+
+    if button is None:
+        return False
+
+    try:
+        before_url = page.url
+        before_body = body_text(page)
+
+        print("[INFO] Klikam 'Dalej'...")
+
+        button.scroll_into_view_if_needed()
+        button.click(timeout=3000)
+
+        # Czekamy maksymalnie 5 sekund na zmianę
+        deadline = time.time() + 5
+
+        while time.time() < deadline:
+            time.sleep(0.25)
+
+            after_url = page.url
+            after_body = body_text(page)
+
+            if after_url != before_url:
+                print("[OK] URL zmienił się.")
+                return True
+
+            if after_body != before_body:
+                print("[OK] Zawartość strony zmieniła się.")
+                return True
+
+            # Jeżeli pojawiło się pole odpowiedzi,
+            # uznajemy, że przeszliśmy dalej.
+            if find_text_input(page) is not None:
+                print("[OK] Pojawiło się pole odpowiedzi.")
+                return True
+
+        print("[!] Po kliknięciu 'Dalej' ekran się nie zmienił.")
+
+        # Jedna próba Enter
+        try:
+            page.keyboard.press("Enter")
+            time.sleep(2)
+
+            if find_text_input(page) is not None:
+                print("[OK] Enter przeszedł do następnego zadania.")
+                return True
+        except Exception:
+            pass
+
+        return False
+
+    except Exception as e:
+        print(f"[!] Błąd kliknięcia 'Dalej': {e}")
+        return False
+
+
 def run():
     if not USERNAME or not PASSWORD:
-        print("[X] BŁĄD: Brak danych logowania w GitHub Secrets!")
+        print("[X] BŁĄD: Brak LINGOS_USER lub LINGOS_PASS w GitHub Secrets!")
         sys.exit(1)
 
     dictionary = {}
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            viewport={'width': 1280, 'height': 720},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
+        browser = p.chromium.launch(
+            headless=True
         )
+
+        context = browser.new_context(
+            viewport={
+                "width": 1280,
+                "height": 720
+            },
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="pl-PL"
+        )
+
         page = context.new_page()
 
         try:
-            print("=== START SESJI LINGOS ===")
-            page.goto("https://lingos.pl/h/login", wait_until="domcontentloaded")
+            print("======================================")
+            print("       START SESJI LINGOS")
+            print("======================================")
+
+            # --------------------------------------------------
+            # LOGOWANIE
+            # --------------------------------------------------
+
+            print("[1] Otwieram stronę logowania...")
+
+            page.goto(
+                "https://lingos.pl/h/login",
+                wait_until="domcontentloaded",
+                timeout=30000
+            )
+
             time.sleep(2)
 
+            # Cookiebot
             try:
-                page.evaluate("document.getElementById('CybotCookiebotDialog')?.remove();")
-            except:
+                page.evaluate(
+                    """
+                    document.getElementById(
+                        'CybotCookiebotDialog'
+                    )?.remove();
+                    """
+                )
+            except Exception:
                 pass
 
-            print("Wpisuję dane logowania...")
-            page.locator("input[type='email'], input[type='text'], input[placeholder*='Email']").first.fill(USERNAME)
-            page.locator("input[type='password']").first.fill(PASSWORD)
-            page.locator("button:has-text('Zaloguj się'), button[type='submit']").first.click()
-            
-            print("Czekam na zalogowanie...")
-            page.wait_for_load_state("networkidle")
-            time.sleep(4)
+            print("[2] Wpisuję dane logowania...")
 
-            print("Szukam przycisku 'Ucz się'...")
+            email_input = page.locator(
+                "input[type='email'], "
+                "input[placeholder*='Email'], "
+                "input[placeholder*='email'], "
+                "input[type='text']"
+            ).first
+
+            password_input = page.locator(
+                "input[type='password']"
+            ).first
+
+            email_input.wait_for(
+                state="visible",
+                timeout=10000
+            )
+
+            password_input.wait_for(
+                state="visible",
+                timeout=10000
+            )
+
+            email_input.fill(USERNAME)
+            password_input.fill(PASSWORD)
+
+            login_button = page.locator(
+                "button:has-text('Zaloguj się'), "
+                "button:has-text('Zaloguj'), "
+                "button[type='submit']"
+            ).first
+
+            login_button.click()
+
+            print("[3] Czekam na zalogowanie...")
+
             try:
-                learn_btn = page.locator("button:has-text('Ucz się'), a:has-text('Ucz się')").first
-                if learn_btn.is_visible(timeout=5000):
-                    learn_btn.click()
-                    print("Kliknięto 'Ucz się'!")
-                    time.sleep(4)
-                else:
-                    page.goto("https://lingos.pl/learning", wait_until="domcontentloaded")
-                    time.sleep(4)
-            except:
-                page.goto("https://lingos.pl/learning", wait_until="domcontentloaded")
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=15000
+                )
+            except PlaywrightTimeoutError:
+                print("[!] networkidle timeout — kontynuuję.")
+
+            time.sleep(3)
+
+            print_page_state(page, "PO LOGOWANIU")
+
+            # --------------------------------------------------
+            # PRZEJŚCIE DO NAUKI
+            # --------------------------------------------------
+
+            print("[4] Szukam 'Ucz się'...")
+
+            learn_button = page.locator(
+                "button:has-text('Ucz się'), "
+                "a:has-text('Ucz się')"
+            ).first
+
+            if visible(learn_button):
+
+                print("[OK] Znaleziono 'Ucz się'.")
+
+                learn_button.click()
+
+                try:
+                    page.wait_for_load_state(
+                        "networkidle",
+                        timeout=10000
+                    )
+                except PlaywrightTimeoutError:
+                    pass
+
+                time.sleep(3)
+
+            else:
+
+                print(
+                    "[INFO] Nie znaleziono przycisku 'Ucz się'. "
+                    "Otwieram /learning..."
+                )
+
+                page.goto(
+                    "https://lingos.pl/learning",
+                    wait_until="domcontentloaded",
+                    timeout=30000
+                )
+
                 time.sleep(4)
 
-            print("Rozpoczynam rozwiązywanie słówek...")
-            for i in range(1, 150):
-                content = page.inner_text("body").lower()
-                
-                if any(kw in content for kw in ["gratulacje", "podsumowanie", "ukończono", "lekcja wykonana", "dzisiaj powtórzone"]):
-                    print("[+] Lekcja zrobiona w 100%!")
+            print_page_state(page, "EKRAN NAUKI")
+
+            screenshot(
+                page,
+                "start_learning.png"
+            )
+
+            # --------------------------------------------------
+            # PĘTLA NAUKI
+            # --------------------------------------------------
+
+            print("======================================")
+            print("      ROZPOCZYNAM NAUKĘ")
+            print("======================================")
+
+            last_body = ""
+            stuck_counter = 0
+            completed = False
+
+            for i in range(1, MAX_ROUNDS + 1):
+
+                current_body = body_text(page)
+
+                # ----------------------------------------------
+                # SPRAWDZENIE UKOŃCZENIA
+                # ----------------------------------------------
+
+                completion_words = [
+                    "gratulacje",
+                    "podsumowanie",
+                    "ukończono",
+                    "lekcja wykonana",
+                    "dzisiaj powtórzone",
+                    "zakończono",
+                    "ukończona",
+                    "wynik",
+                ]
+
+                low_body = current_body.lower()
+
+                if any(
+                    word in low_body
+                    for word in completion_words
+                ):
+                    print()
+                    print("======================================")
+                    print("[+] WYKRYTO ZAKOŃCZENIE LEKCJI!")
+                    print("======================================")
+
+                    completed = True
                     break
 
-                # 1. SPRAWDZENIE CZY JESTEŚMY NA EKRANIE BŁĘDU (Przycisk Dalej)
-                dalej_btn = page.locator("button:has-text('Dalej'), a:has-text('Dalej')").first
-                
-                if dalej_btn.is_visible(timeout=800):
-                    # Próba zapamiętania słówka i poprawnej odpowiedzi z ekranu błędu
-                    try:
-                        red_box = page.locator("div.bg-red-100, div.border-red-500, div[class*='red']").first
-                        if red_box.is_visible(timeout=300):
-                            box_text = red_box.inner_text().replace("BŁĘDNA ODPOWIEDŹ", "").replace("volume_up", "").strip()
-                            lines = [l.strip() for l in box_text.split('\n') if l.strip()]
-                            correct_text = lines[-1] if lines else box_text
-                            
-                            prompt_elem = red_box.locator("xpath=preceding-sibling::*[not(contains(text(), 'Dalej'))][1]").first
-                            prompt_text = prompt_elem.inner_text().replace("PRZETŁUMACZ", "").strip() if prompt_elem.is_visible() else ""
-                            
-                            if prompt_text and correct_text:
-                                dictionary[prompt_text] = correct_text
-                                print(f"[ZAPAMIĘTANO] '{prompt_text}' -> '{correct_text}'")
-                    except:
-                        pass
+                # ----------------------------------------------
+                # EKRAN BŁĘDNEJ ODPOWIEDZI
+                # ----------------------------------------------
 
-                    print(f"[{i}] Zatwierdzam ekran błędu przez Enter...")
-                    # Agresywne uderzenie w klawisz Enter, który wymusza przejście na Lingosie
-                    page.keyboard.press("Enter")
-                    time.sleep(0.5)
-                    try:
-                        dalej_btn.click(force=True)
-                    except:
-                        pass
-                    
-                    time.sleep(1.5)
+                next_button = find_next_button(page)
+
+                if next_button is not None:
+
+                    print()
+                    print(
+                        f"[{i}] Wykryto ekran z przyciskiem "
+                        f"'Dalej'."
+                    )
+
+                    prompt = get_current_prompt(page)
+                    correct = extract_correct_answer(page)
+
+                    if prompt and correct:
+                        dictionary[prompt] = correct
+
+                        print(
+                            f"[ZAPAMIĘTANO] "
+                            f"'{prompt}' -> '{correct}'"
+                        )
+
+                    else:
+                        if correct:
+                            print(
+                                f"[INFO] Poprawna odpowiedź: "
+                                f"{correct}"
+                            )
+
+                    success = click_next_and_wait(page)
+
+                    if not success:
+
+                        stuck_counter += 1
+
+                        print(
+                            f"[!] Brak przejścia "
+                            f"({stuck_counter}/3)."
+                        )
+
+                        screenshot(
+                            page,
+                            f"stuck_{i}.png"
+                        )
+
+                        print_page_state(
+                            page,
+                            f"ZAWIESZENIE {i}"
+                        )
+
+                        if stuck_counter >= 3:
+                            print(
+                                "[X] Trzykrotnie nie udało "
+                                "się przejść dalej."
+                            )
+
+                            raise RuntimeError(
+                                "Lingos nie przechodzi "
+                                "z ekranu 'Dalej'."
+                            )
+
+                    else:
+                        stuck_counter = 0
+
+                    time.sleep(1)
                     continue
 
-                # 2. STANDARDOWE POLE TEKSTOWE
-                text_input = page.locator("input[type='text']:not([readonly])").first
-                if text_input.is_visible(timeout=800):
-                    current_word = ""
-                    try:
-                        word_elem = page.locator("h3, div.text-xl, div.text-2xl, div[class*='word']").first
-                        if word_elem.is_visible():
-                            current_word = word_elem.inner_text().replace("PRZETŁUMACZ", "").strip()
-                    except:
-                        pass
+                # ----------------------------------------------
+                # POLE ODPOWIEDZI
+                # ----------------------------------------------
 
-                    answer_to_type = dictionary.get(current_word, "a")
-                    print(f"[{i}] Słowo: '{current_word}' -> Wpisuję: '{answer_to_type}'")
-                    
-                    text_input.fill(answer_to_type)
-                    time.sleep(0.3)
-                    text_input.press("Enter")
+                text_input = find_text_input(page)
+
+                if text_input is not None:
+
+                    current_word = get_current_prompt(page)
+
+                    print()
+                    print(
+                        f"[{i}] Aktualne słowo: "
+                        f"'{current_word}'"
+                    )
+
+                    # Jeżeli znamy odpowiedź — używamy jej.
+                    if current_word in dictionary:
+
+                        answer = dictionary[current_word]
+
+                        print(
+                            f"[{i}] Znaleziona odpowiedź: "
+                            f"'{answer}'"
+                        )
+
+                        text_input.fill(answer)
+
+                    else:
+
+                        # Pierwsze spotkanie słowa.
+                        # Celowo wysyłamy pustą odpowiedź,
+                        # aby Lingos pokazał poprawne rozwiązanie.
+                        print(
+                            f"[{i}] Nie znam jeszcze odpowiedzi."
+                        )
+
+                        text_input.fill("")
+
+                    # Zatwierdzenie
+                    try:
+                        text_input.press("Enter")
+                    except Exception:
+                        try:
+                            page.keyboard.press("Enter")
+                        except Exception:
+                            pass
+
                     time.sleep(1.5)
+
                     continue
 
-                time.sleep(0.5)
+                # ----------------------------------------------
+                # BRAK ROZPOZNANEGO EKRANU
+                # ----------------------------------------------
 
-            page.screenshot(path="final_success.png")
-            print("=== ZAKOŃCZONO SESJĘ ===")
+                if current_body == last_body:
+                    stuck_counter += 1
+                else:
+                    stuck_counter = 0
+
+                last_body = current_body
+
+                print(
+                    f"[{i}] Nie rozpoznano aktualnego ekranu."
+                )
+
+                if stuck_counter >= 5:
+
+                    print(
+                        "[X] Strona nie zmienia się "
+                        "i nie rozpoznaję elementów."
+                    )
+
+                    screenshot(
+                        page,
+                        "unknown_screen.png"
+                    )
+
+                    print_page_state(
+                        page,
+                        "NIEZNANY EKRAN"
+                    )
+
+                    raise RuntimeError(
+                        "Nie udało się rozpoznać "
+                        "ekranu Lingosa."
+                    )
+
+                time.sleep(1)
+
+            # --------------------------------------------------
+            # KONIEC
+            # --------------------------------------------------
+
+            screenshot(
+                page,
+                "final_success.png"
+            )
+
+            print()
+            print("======================================")
+
+            if completed:
+                print("   LEKCJA ZAKOŃCZONA")
+            else:
+                print(
+                    "   Osiągnięto limit prób "
+                    f"({MAX_ROUNDS})"
+                )
+
+            print("======================================")
+
+            print()
+            print("Zapamiętane słowa:")
+
+            if dictionary:
+                for word, answer in dictionary.items():
+                    print(
+                        f"  {word} -> {answer}"
+                    )
+            else:
+                print("  Brak.")
+
+            if not completed:
+                sys.exit(1)
 
         except Exception as e:
-            print(f"[X] Błąd: {e}")
-            page.screenshot(path="error_final.png")
+
+            print()
+            print("======================================")
+            print("[X] BŁĄD")
+            print("======================================")
+            print(e)
+
+            screenshot(
+                page,
+                "error_final.png"
+            )
+
+            print_page_state(
+                page,
+                "STAN PO BŁĘDZIE"
+            )
+
             sys.exit(1)
+
         finally:
             browser.close()
+
 
 if __name__ == "__main__":
     run()
