@@ -13,7 +13,7 @@ MAX_ROUNDS = 300
 
 
 # ============================================================
-# PODSTAWOWE FUNKCJE
+# POMOCNICZE
 # ============================================================
 
 def normalize(text):
@@ -60,11 +60,16 @@ def is_visible_enabled(locator):
 # ============================================================
 
 def print_page_state(page, prefix=""):
-    print(
-        f"{prefix}URL: {page.url}"
-    )
 
     try:
+        print(
+            f"{prefix}URL: {page.url}"
+        )
+    except Exception:
+        pass
+
+    try:
+
         buttons = page.locator("button")
 
         result = []
@@ -74,14 +79,16 @@ def print_page_state(page, prefix=""):
             el = buttons.nth(i)
 
             try:
-                if el.is_visible():
 
-                    txt = normalize(
-                        el.inner_text()
-                    )
+                if not el.is_visible():
+                    continue
 
-                    if txt:
-                        result.append(txt)
+                txt = normalize(
+                    el.inner_text()
+                )
+
+                if txt:
+                    result.append(txt)
 
             except Exception:
                 pass
@@ -94,6 +101,7 @@ def print_page_state(page, prefix=""):
         pass
 
     try:
+
         inputs = page.locator("input")
 
         result = []
@@ -104,14 +112,15 @@ def print_page_state(page, prefix=""):
 
             try:
 
-                if el.is_visible():
+                if not el.is_visible():
+                    continue
 
-                    result.append(
-                        f"type={el.get_attribute('type')} "
-                        f"name={el.get_attribute('name')} "
-                        f"placeholder={el.get_attribute('placeholder')} "
-                        f"id={el.get_attribute('id')}"
-                    )
+                result.append(
+                    f"type={el.get_attribute('type')} "
+                    f"name={el.get_attribute('name')} "
+                    f"placeholder={el.get_attribute('placeholder')} "
+                    f"id={el.get_attribute('id')}"
+                )
 
             except Exception:
                 pass
@@ -125,14 +134,85 @@ def print_page_state(page, prefix=""):
 
 
 # ============================================================
-# COOKIES
+# COOKIEBOT
 # ============================================================
 
 def accept_cookies(page):
 
     try:
 
-        cookie_buttons = [
+        # Najpierw sprawdzamy, czy Cookiebot istnieje.
+
+        cookie_dialog = page.locator(
+            "#CybotCookiebotDialog"
+        )
+
+        if cookie_dialog.count() == 0:
+            return
+
+        try:
+
+            if not cookie_dialog.is_visible():
+                return
+
+        except Exception:
+            return
+
+        print(
+            "[INFO] Wykryto okno cookies."
+        )
+
+        # ----------------------------------------------------
+        # Najczęściej używane przyciski Cookiebot.
+        # ----------------------------------------------------
+
+        selectors = [
+            "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+            "#CybotCookiebotDialogBodyLevelButtonAccept",
+            "#CybotCookiebotDialogBodyButtonAccept",
+            "#CybotCookiebotDialogBodyLevelButtonCustomize",
+        ]
+
+        for selector in selectors:
+
+            try:
+
+                loc = page.locator(
+                    selector
+                )
+
+                for i in range(loc.count()):
+
+                    el = loc.nth(i)
+
+                    if not el.is_visible():
+                        continue
+
+                    try:
+
+                        el.click(
+                            timeout=5000
+                        )
+
+                        time.sleep(1)
+
+                        print(
+                            "[OK] Obsłużono cookies."
+                        )
+
+                        return
+
+                    except Exception:
+                        pass
+
+            except Exception:
+                pass
+
+        # ----------------------------------------------------
+        # Fallback po tekście.
+        # ----------------------------------------------------
+
+        texts = [
             "Akceptuję",
             "Akceptuj",
             "Zgadzam się",
@@ -140,7 +220,7 @@ def accept_cookies(page):
             "Allow all",
         ]
 
-        for text in cookie_buttons:
+        for text in texts:
 
             try:
 
@@ -153,28 +233,104 @@ def accept_cookies(page):
 
                     el = loc.nth(i)
 
-                    if not is_visible_enabled(el):
+                    if not el.is_visible():
                         continue
 
-                    print(
-                        f"[INFO] Akceptuję cookies: {text}"
-                    )
+                    try:
 
-                    el.click()
+                        el.click(
+                            timeout=5000
+                        )
 
-                    time.sleep(1)
+                        time.sleep(1)
 
-                    return
+                        print(
+                            f"[OK] Zaakceptowano cookies: {text}"
+                        )
+
+                        return
+
+                    except Exception:
+                        pass
 
             except Exception:
                 pass
+
+        # ----------------------------------------------------
+        # Jeżeli dialog nadal istnieje, próbujemy kliknąć
+        # widoczny przycisk typu "Accept".
+        # ----------------------------------------------------
+
+        try:
+
+            buttons = cookie_dialog.locator(
+                "button"
+            )
+
+            for i in range(buttons.count()):
+
+                el = buttons.nth(i)
+
+                if not el.is_visible():
+                    continue
+
+                txt = normalize(
+                    el.inner_text()
+                ).lower()
+
+                if any(
+                    word in txt
+                    for word in [
+                        "akcept",
+                        "zgadzam",
+                        "accept",
+                        "allow",
+                    ]
+                ):
+
+                    try:
+
+                        el.click(
+                            timeout=5000
+                        )
+
+                        time.sleep(1)
+
+                        print(
+                            "[OK] Obsłużono Cookiebot."
+                        )
+
+                        return
+
+                    except Exception:
+                        pass
+
+        except Exception:
+            pass
 
     except Exception:
         pass
 
 
+def cookies_still_visible(page):
+
+    try:
+
+        dialog = page.locator(
+            "#CybotCookiebotDialog"
+        )
+
+        return (
+            dialog.count() > 0
+            and dialog.is_visible()
+        )
+
+    except Exception:
+        return False
+
+
 # ============================================================
-# LOGOWANIE
+# POLA LOGOWANIA
 # ============================================================
 
 def find_login_fields(page):
@@ -199,17 +355,14 @@ def find_login_fields(page):
             if is_visible_enabled(el):
 
                 password_input = el
+
                 break
 
     except Exception:
         pass
 
     # --------------------------------------------------------
-    # LOGIN / EMAIL
-    #
-    # UWAGA:
-    # Nie bierzemy wszystkich inputów,
-    # bo Cookiebot ma własne checkboxy.
+    # LOGIN
     # --------------------------------------------------------
 
     try:
@@ -218,7 +371,7 @@ def find_login_fields(page):
             "input:not([type='checkbox']):not([type='hidden']):not([type='password'])"
         )
 
-        # Najpierw szukamy po nazwach.
+        # Najpierw po nazwie / placeholderze / ID.
 
         for i in range(loc.count()):
 
@@ -247,11 +400,11 @@ def find_login_fields(page):
                 or ""
             ).lower()
 
-            if input_type in (
+            if input_type in [
                 "submit",
                 "button",
                 "reset",
-            ):
+            ]:
                 continue
 
             combined = (
@@ -275,11 +428,11 @@ def find_login_fields(page):
             ):
 
                 username_input = el
+
                 break
 
         # ----------------------------------------------------
-        # AWARYJNIE:
-        # pierwszy edytowalny text/email
+        # Fallback.
         # ----------------------------------------------------
 
         if username_input is None:
@@ -296,13 +449,14 @@ def find_login_fields(page):
                     or "text"
                 ).lower()
 
-                if input_type in (
+                if input_type in [
                     "",
                     "text",
                     "email",
-                ):
+                ]:
 
                     username_input = el
+
                     break
 
     except Exception:
@@ -314,9 +468,14 @@ def find_login_fields(page):
     )
 
 
+# ============================================================
+# PRZYCISK LOGOWANIA
+# ============================================================
+
 def find_login_button(page):
 
     selectors = [
+        "button#submit-login-button",
         "button[type='submit']",
         "input[type='submit']",
         "button:has-text('Zaloguj się')",
@@ -345,6 +504,10 @@ def find_login_button(page):
     return None
 
 
+# ============================================================
+# LOGOWANIE
+# ============================================================
+
 def login(page):
 
     print(
@@ -369,7 +532,28 @@ def login(page):
 
     time.sleep(2)
 
+    # --------------------------------------------------------
+    # COOKIES
+    # --------------------------------------------------------
+
     accept_cookies(page)
+
+    # Jeżeli Cookiebot nadal zasłania stronę,
+    # dajemy mu chwilę.
+
+    if cookies_still_visible(page):
+
+        print(
+            "[INFO] Cookiebot nadal widoczny."
+        )
+
+        time.sleep(1)
+
+        accept_cookies(page)
+
+    # --------------------------------------------------------
+    # POLA
+    # --------------------------------------------------------
 
     username_input, password_input = find_login_fields(
         page
@@ -423,62 +607,100 @@ def login(page):
         return False
 
     # --------------------------------------------------------
-    # LOGOWANIE
+    # COOKIES JESZCZE RAZ
+    # --------------------------------------------------------
+
+    accept_cookies(page)
+
+    # --------------------------------------------------------
+    # PRZYCISK
     # --------------------------------------------------------
 
     login_button = find_login_button(
         page
     )
 
-    try:
+    # --------------------------------------------------------
+    # PRÓBA KLIKNIĘCIA
+    # --------------------------------------------------------
 
-        if login_button:
+    if login_button:
 
-            print(
-                "[INFO] Klikam przycisk logowania..."
+        print(
+            "[INFO] Klikam przycisk logowania..."
+        )
+
+        try:
+
+            login_button.click(
+                timeout=5000
             )
 
-            login_button.click()
-
-        else:
+        except Exception as e:
 
             print(
-                "[INFO] Nie znaleziono przycisku."
+                f"[WARN] Przycisk jest zasłonięty: {e}"
             )
 
             print(
                 "[INFO] Wysyłam formularz klawiszem Enter..."
             )
 
+            try:
+
+                password_input.press(
+                    "Enter"
+                )
+
+            except Exception as enter_error:
+
+                print(
+                    f"[ERROR] Enter nie zadziałał: "
+                    f"{enter_error}"
+                )
+
+                return False
+
+    else:
+
+        print(
+            "[INFO] Brak przycisku — wysyłam Enter."
+        )
+
+        try:
+
             password_input.press(
                 "Enter"
             )
 
-    except Exception as e:
+        except Exception as e:
 
-        print(
-            f"[WARN] Problem przy wysyłaniu formularza: {e}"
-        )
+            print(
+                f"[ERROR] Nie można wysłać formularza: {e}"
+            )
 
-        try:
-            password_input.press("Enter")
-        except Exception:
-            pass
+            return False
 
     # --------------------------------------------------------
-    # CZEKAMY NA REAKCJĘ
+    # CZEKANIE NA PRZEJŚCIE
     # --------------------------------------------------------
 
     for _ in range(30):
 
         time.sleep(1)
 
-        current_url = page.url.lower()
+        try:
+            current_url = page.url.lower()
+        except Exception:
+            current_url = ""
 
-        if "/h/login" not in current_url:
+        if (
+            current_url
+            and "/h/login" not in current_url
+        ):
 
             print(
-                f"[OK] Logowanie zakończone."
+                "[OK] Logowanie zakończone."
             )
 
             print(
@@ -488,19 +710,15 @@ def login(page):
             return True
 
     # --------------------------------------------------------
-    # NADAL LOGIN
+    # NIE UDAŁO SIĘ
     # --------------------------------------------------------
 
     print(
-        f"[ERROR] Nadal jesteśmy na stronie logowania:"
-    )
-
-    print(
-        page.url
-    )
-
-    print(
         "[ERROR] Logowanie nie zostało potwierdzone."
+    )
+
+    print(
+        f"[ERROR] Aktualny URL: {page.url}"
     )
 
     print_page_state(
@@ -525,7 +743,7 @@ def login(page):
 
 
 # ============================================================
-# ZNALEZIENIE AKTUALNEJ LEKCJI
+# AKTUALNY LINK DO NAUKI
 # ============================================================
 
 def find_learning_link(page):
@@ -533,11 +751,6 @@ def find_learning_link(page):
     print(
         "[INFO] Szukam aktualnego linku do nauki..."
     )
-
-    # --------------------------------------------------------
-    # Najpierw sprawdzamy wszystkie linki.
-    # Nie używamy żadnego konkretnego groupId.
-    # --------------------------------------------------------
 
     try:
 
@@ -568,14 +781,11 @@ def find_learning_link(page):
                 if not href:
                     continue
 
-                full = href.lower()
-
-                # Interesują nas tylko ścieżki związane
-                # z nauką.
+                low = href.lower()
 
                 if (
-                    "/learning/" in full
-                    or "/learn/" in full
+                    "/learning/" in low
+                    or "/learn/" in low
                 ):
 
                     candidates.append(
@@ -594,7 +804,8 @@ def find_learning_link(page):
         )
 
         # ----------------------------------------------------
-        # Preferujemy start lekcji.
+        # Preferujemy link startowy.
+        # Nadal NIE wpisujemy żadnego konkretnego groupId.
         # ----------------------------------------------------
 
         for href, text in candidates:
@@ -602,7 +813,7 @@ def find_learning_link(page):
             if "/learning/start/" in href.lower():
 
                 print(
-                    f"[OK] Znaleziono aktualną lekcję:"
+                    "[OK] Znaleziono aktualną lekcję:"
                 )
 
                 print(
@@ -612,8 +823,7 @@ def find_learning_link(page):
                 return href
 
         # ----------------------------------------------------
-        # Jeśli nie ma /learning/start/
-        # używamy pierwszego linku do learning.
+        # Dowolny link learning.
         # ----------------------------------------------------
 
         if candidates:
@@ -621,7 +831,7 @@ def find_learning_link(page):
             href, text = candidates[0]
 
             print(
-                f"[OK] Znaleziono link do nauki:"
+                "[OK] Znaleziono link do nauki:"
             )
 
             print(
@@ -646,8 +856,10 @@ def find_learning_link(page):
 def open_learning(page):
 
     # --------------------------------------------------------
-    # Nie ma tutaj żadnego stałego linku do lekcji.
+    # Czasami dashboard ładuje się chwilę.
     # --------------------------------------------------------
+
+    time.sleep(2)
 
     link = find_learning_link(
         page
@@ -657,15 +869,12 @@ def open_learning(page):
 
         try:
 
-            print(
-                "[INFO] Przechodzę do aktualnej lekcji..."
-            )
-
-            # Jeśli href jest względny,
-            # klikamy element zamiast ręcznie budować URL.
+            # ------------------------------------------------
+            # Szukamy konkretnego elementu po href.
+            # ------------------------------------------------
 
             links = page.locator(
-                f"a[href='{link}']"
+                "a[href]"
             )
 
             clicked = False
@@ -674,25 +883,58 @@ def open_learning(page):
 
                 el = links.nth(i)
 
-                if is_visible_enabled(el):
+                try:
 
-                    el.click()
+                    if not el.is_visible():
+                        continue
+
+                    href = (
+                        el.get_attribute("href")
+                        or ""
+                    )
+
+                    if href != link:
+                        continue
+
+                    print(
+                        "[INFO] Klikam znalezioną lekcję..."
+                    )
+
+                    el.click(
+                        timeout=10000
+                    )
 
                     clicked = True
 
                     break
 
+                except Exception:
+                    pass
+
+            # ------------------------------------------------
+            # Fallback — korzystamy z odnalezionego href.
+            #
+            # To nadal jest dynamiczny adres znaleziony
+            # aktualnie na stronie.
+            # ------------------------------------------------
+
             if not clicked:
 
-                # Fallback dla względnego/bezwzględnego href.
-
                 if link.startswith("/"):
+
                     target = (
                         "https://lingos.pl"
                         + link
                     )
+
                 else:
+
                     target = link
+
+                print(
+                    f"[INFO] Otwieram znaleziony adres: "
+                    f"{target}"
+                )
 
                 page.goto(
                     target,
@@ -700,12 +942,13 @@ def open_learning(page):
                     timeout=60000
                 )
 
-            time.sleep(3)
+            time.sleep(2)
 
             if "/learning/" in page.url.lower():
 
                 print(
-                    f"[OK] Jesteśmy w nauce: {page.url}"
+                    f"[OK] Jesteśmy w nauce: "
+                    f"{page.url}"
                 )
 
                 return True
@@ -714,12 +957,12 @@ def open_learning(page):
 
             print(
                 f"[WARN] Nie udało się wejść "
-                f"w znaleziony link: {e}"
+                f"w znalezioną lekcję: {e}"
             )
 
-    # --------------------------------------------------------
-    # Jeśli linku nie ma, szukamy przycisku/tekstu.
-    # --------------------------------------------------------
+    # ========================================================
+    # PRÓBA PRZEZ TEKST / PRZYCISK
+    # ========================================================
 
     selectors = [
         "text=Ucz się",
@@ -740,43 +983,44 @@ def open_learning(page):
 
                 el = loc.nth(i)
 
-                if not is_visible_enabled(el):
+                if not el.is_visible():
                     continue
 
-                print(
-                    f"[INFO] Próbuję wejść przez: "
-                    f"{selector}"
-                )
-
-                el.click()
-
-                time.sleep(3)
-
-                if "/learning/" in page.url.lower():
+                try:
 
                     print(
-                        f"[OK] Jesteśmy w nauce: {page.url}"
+                        f"[INFO] Próbuję: {selector}"
                     )
 
-                    return True
+                    el.click(
+                        timeout=10000
+                    )
+
+                    time.sleep(2)
+
+                    if "/learning/" in page.url.lower():
+
+                        print(
+                            f"[OK] Jesteśmy w nauce: "
+                            f"{page.url}"
+                        )
+
+                        return True
+
+                except Exception:
+                    pass
 
         except Exception:
             pass
 
-    # --------------------------------------------------------
-    # Ostatnia próba:
-    # przechodzimy na stronę główną po zalogowaniu
-    # i ponownie szukamy linków.
-    # --------------------------------------------------------
+    # ========================================================
+    # ODŚWIEŻENIE DASHBOARDU
+    # ========================================================
 
     try:
 
         print(
-            "[INFO] Nie znaleziono lekcji."
-        )
-
-        print(
-            "[INFO] Odświeżam aktualną stronę..."
+            "[INFO] Odświeżam dashboard..."
         )
 
         page.reload(
@@ -784,7 +1028,7 @@ def open_learning(page):
             timeout=60000
         )
 
-        time.sleep(2)
+        time.sleep(3)
 
         link = find_learning_link(
             page
@@ -792,37 +1036,39 @@ def open_learning(page):
 
         if link:
 
-            try:
+            if link.startswith("/"):
 
-                if link.startswith("/"):
-                    target = (
-                        "https://lingos.pl"
-                        + link
-                    )
-                else:
-                    target = link
-
-                page.goto(
-                    target,
-                    wait_until="domcontentloaded",
-                    timeout=60000
+                target = (
+                    "https://lingos.pl"
+                    + link
                 )
 
-                time.sleep(2)
+            else:
 
-                if "/learning/" in page.url.lower():
+                target = link
 
-                    print(
-                        f"[OK] Jesteśmy w nauce: {page.url}"
-                    )
+            page.goto(
+                target,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
 
-                    return True
+            time.sleep(2)
 
-            except Exception:
-                pass
+            if "/learning/" in page.url.lower():
 
-    except Exception:
-        pass
+                print(
+                    f"[OK] Jesteśmy w nauce: "
+                    f"{page.url}"
+                )
+
+                return True
+
+    except Exception as e:
+
+        print(
+            f"[WARN] Odświeżenie nie pomogło: {e}"
+        )
 
     print(
         "[ERROR] Nie udało się znaleźć aktualnej lekcji."
@@ -850,7 +1096,86 @@ def open_learning(page):
 
 
 # ============================================================
-# WYCIĄGANIE AKTUALNEGO SŁOWA
+# ODPOWIEDŹ — INPUT
+# ============================================================
+
+def find_answer_input(page):
+
+    # --------------------------------------------------------
+    # TO JEST WŁAŚNIE FUNKCJA, KTÓREJ BRAKOWAŁO
+    # W POPRZEDNIEJ WERSJI.
+    # --------------------------------------------------------
+
+    selectors = [
+        "input[placeholder='Twoja odpowiedź']",
+        "textarea[placeholder='Twoja odpowiedź']",
+        "input[placeholder*='Twoja odpowiedź']",
+        "textarea[placeholder*='Twoja odpowiedź']",
+    ]
+
+    for selector in selectors:
+
+        try:
+
+            loc = page.locator(
+                selector
+            )
+
+            for i in range(loc.count()):
+
+                el = loc.nth(i)
+
+                if is_visible_enabled(el):
+
+                    return el
+
+        except Exception:
+            pass
+
+    # --------------------------------------------------------
+    # AWARYJNIE
+    # --------------------------------------------------------
+
+    selectors = [
+        "input[type='text']",
+        "textarea",
+    ]
+
+    for selector in selectors:
+
+        try:
+
+            loc = page.locator(
+                selector
+            )
+
+            for i in range(loc.count()):
+
+                el = loc.nth(i)
+
+                if not is_visible_enabled(el):
+                    continue
+
+                placeholder = (
+                    el.get_attribute("placeholder")
+                    or ""
+                ).lower()
+
+                if (
+                    "odpowied" in placeholder
+                    or placeholder == ""
+                ):
+
+                    return el
+
+        except Exception:
+            pass
+
+    return None
+
+
+# ============================================================
+# AKTUALNE SŁOWO
 # ============================================================
 
 def extract_prompt(page):
@@ -881,7 +1206,6 @@ def extract_prompt(page):
         )
 
         if result:
-
             return result
 
     return ""
@@ -915,7 +1239,7 @@ def extract_correct_answer(
         pattern = (
             re.escape(prompt)
             + r"\s+(.+?)"
-            r"(?:\s+Dalej(?:\s+\[Enter\])?|$)"
+            + r"(?:\s+Dalej(?:\s+\[Enter\])?|$)"
         )
 
         match = re.search(
@@ -932,6 +1256,21 @@ def extract_correct_answer(
 
             if answer:
 
+                # --------------------------------------------
+                # Odcinamy przypadkowe elementy.
+                # --------------------------------------------
+
+                answer = re.sub(
+                    r"\s*\[Enter\]\s*$",
+                    "",
+                    answer,
+                    flags=re.IGNORECASE
+                )
+
+                answer = normalize(
+                    answer
+                )
+
                 return (
                     prompt,
                     answer
@@ -944,60 +1283,37 @@ def extract_correct_answer(
 
 
 # ============================================================
-# EKRAN ODPOWIEDZI
+# DALEJ
 # ============================================================
 
-def is_answer_screen(page):
+def find_next_button(page):
 
-    return (
-        find_answer_input(page)
-        is not None
-    )
+    selectors = [
+        "button:has-text('Dalej')",
+        "button:has-text('dalej')",
+    ]
 
+    for selector in selectors:
 
-# ============================================================
-# WYSŁANIE ODPOWIEDZI
-# ============================================================
+        try:
 
-def submit_answer(
-    page,
-    input_element,
-    answer
-):
+            loc = page.locator(
+                selector
+            )
 
-    try:
+            for i in range(loc.count()):
 
-        input_element.click()
+                el = loc.nth(i)
 
-        input_element.fill(
-            answer
-        )
+                if is_visible_enabled(el):
 
-        print(
-            f"[INFO] Wpisuję odpowiedź: "
-            f"'{answer}'"
-        )
+                    return el
 
-        input_element.press(
-            "Enter"
-        )
+        except Exception:
+            pass
 
-        time.sleep(1)
+    return None
 
-        return True
-
-    except Exception as e:
-
-        print(
-            f"[ERROR] Nie można wysłać odpowiedzi: {e}"
-        )
-
-        return False
-
-
-# ============================================================
-# KLIKNIĘCIE DALEJ
-# ============================================================
 
 def click_next(page):
 
@@ -1010,9 +1326,11 @@ def click_next(page):
 
     try:
 
-        button.click()
+        button.click(
+            timeout=10000
+        )
 
-        time.sleep(1)
+        time.sleep(0.7)
 
         return True
 
@@ -1026,7 +1344,50 @@ def click_next(page):
 
 
 # ============================================================
-# CZY KONIEC
+# ODPOWIEDŹ
+# ============================================================
+
+def submit_answer(
+    page,
+    answer_input,
+    answer
+):
+
+    try:
+
+        answer_input.click(
+            timeout=5000
+        )
+
+        answer_input.fill(
+            answer
+        )
+
+        print(
+            f"[INFO] Wpisuję odpowiedź: "
+            f"'{answer}'"
+        )
+
+        answer_input.press(
+            "Enter"
+        )
+
+        time.sleep(0.8)
+
+        return True
+
+    except Exception as e:
+
+        print(
+            f"[ERROR] Nie można wysłać odpowiedzi: "
+            f"{e}"
+        )
+
+        return False
+
+
+# ============================================================
+# KONIEC
 # ============================================================
 
 def is_finished(page):
@@ -1070,8 +1431,16 @@ def run():
 
         sys.exit(1)
 
+    # --------------------------------------------------------
+    # SŁOWNIK
+    #
+    # np.
+    # "wpaść do kogoś" -> "come over"
+    # --------------------------------------------------------
+
     dictionary = {}
 
+    # Ostatnie prawdziwe słowo.
     last_prompt = ""
 
     with sync_playwright() as p:
@@ -1093,7 +1462,7 @@ def run():
         try:
 
             # ==================================================
-            # LOGIN
+            # LOGOWANIE
             # ==================================================
 
             if not login(page):
@@ -1111,19 +1480,22 @@ def run():
             if not open_learning(page):
 
                 print(
-                    "[FATAL] Nie udało się znaleźć "
-                    "aktualnej lekcji."
+                    "[FATAL] Nie znaleziono aktualnej lekcji."
                 )
 
                 sys.exit(1)
 
             # ==================================================
-            # NAUKA
+            # START
             # ==================================================
 
             print(
                 "[INFO] Rozpoczynam naukę..."
             )
+
+            # ==================================================
+            # PĘTLA
+            # ==================================================
 
             for round_number in range(
                 1,
@@ -1139,15 +1511,17 @@ def run():
                 if is_finished(page):
 
                     print(
-                        "[OK] Lekcja zakończona."
+                        "[OK] Wykryto zakończenie lekcji."
                     )
 
                     break
 
                 # ------------------------------------------------
-                # INPUT ODPOWIEDZI
+                # NAJWAŻNIEJSZE:
+                # NAJPIERW SZUKAMY INPUTU.
                 #
-                # TO MA PIERWSZEŃSTWO NAD "DALEJ"
+                # Dzięki temu nie klikamy "Dalej"
+                # zanim nie odpowiemy.
                 # ------------------------------------------------
 
                 answer_input = find_answer_input(
@@ -1167,10 +1541,19 @@ def run():
                         f"'{prompt}'"
                     )
 
+                    # ------------------------------------------------
+                    # Jeśli parser nie znalazł słowa,
+                    # nie wysyłamy pustej odpowiedzi bez sensu.
+                    # ------------------------------------------------
+
                     if not prompt:
 
                         print(
-                            "[WARN] Nie znaleziono słowa."
+                            "[WARN] Nie znaleziono aktualnego słowa."
+                        )
+
+                        print(
+                            "[DEBUG]"
                         )
 
                         print(
@@ -1179,12 +1562,16 @@ def run():
 
                         screenshot(
                             page,
-                            f"unknown_prompt_{round_number}"
+                            f"prompt_error_{round_number}"
                         )
 
                         time.sleep(1)
 
                         continue
+
+                    # ------------------------------------------------
+                    # Zapamiętujemy słowo.
+                    # ------------------------------------------------
 
                     last_prompt = prompt
 
@@ -1201,23 +1588,24 @@ def run():
                         answer = dictionary[key]
 
                         print(
-                            f"[INFO] Z pamięci: "
+                            f"[INFO] ZAPAMIĘTANA: "
                             f"'{answer}'"
                         )
 
                     else:
 
                         # ------------------------------------------------
-                        # Pierwsza próba:
-                        # puste pole.
+                        # Nie znamy.
                         #
-                        # Lingos pokaże poprawną odpowiedź.
+                        # Wysyłamy pustą odpowiedź.
+                        # Lingos powinien pokazać poprawną.
                         # ------------------------------------------------
 
                         answer = ""
 
                         print(
-                            "[INFO] Brak odpowiedzi w pamięci."
+                            "[INFO] Brak odpowiedzi "
+                            "w słowniku — sprawdzam poprawną."
                         )
 
                     submit_answer(
@@ -1229,16 +1617,19 @@ def run():
                     continue
 
                 # ------------------------------------------------
-                # EKRAN PO ODPOWIEDZI
+                # NIE MA INPUTU
+                #
+                # Sprawdzamy, czy Lingos pokazał odpowiedź.
                 # ------------------------------------------------
 
                 if last_prompt:
 
-                    result_prompt, correct_answer = (
-                        extract_correct_answer(
-                            page,
-                            last_prompt
-                        )
+                    (
+                        result_prompt,
+                        correct_answer
+                    ) = extract_correct_answer(
+                        page,
+                        last_prompt
                     )
 
                     if (
@@ -1254,15 +1645,23 @@ def run():
                             correct_answer
                         )
 
-                        dictionary[key] = answer
+                        # ------------------------------------------------
+                        # Zabezpieczenie przed zapisaniem
+                        # "Dalej" jako odpowiedzi.
+                        # ------------------------------------------------
 
-                        print(
-                            f"[ZAPAMIĘTANO] "
-                            f"'{result_prompt}' -> "
-                            f"'{answer}'"
-                        )
+                        if answer.lower() not in [
+                            "dalej",
+                            "[enter]",
+                        ]:
 
-                        last_prompt = result_prompt
+                            dictionary[key] = answer
+
+                            print(
+                                f"[ZAPAMIĘTANO] "
+                                f"'{result_prompt}' -> "
+                                f"'{answer}'"
+                            )
 
                 # ------------------------------------------------
                 # DALEJ
@@ -1276,6 +1675,7 @@ def run():
                 # NIEZNANY EKRAN
                 # ------------------------------------------------
 
+                print()
                 print(
                     f"[{round_number}] "
                     "Nie rozpoznano ekranu."
@@ -1301,11 +1701,21 @@ def run():
 
                 time.sleep(2)
 
+            # ==================================================
+            # KONIEC
+            # ==================================================
+
             print()
             print(
                 f"[INFO] Zapamiętanych słów: "
                 f"{len(dictionary)}"
             )
+
+            for key, value in dictionary.items():
+
+                print(
+                    f"[SŁOWNIK] {key} -> {value}"
+                )
 
             print(
                 "[OK] Bot zakończył działanie."
