@@ -38,6 +38,7 @@ def get_buttons(page):
 
     try:
         buttons = page.locator("button")
+
         for i in range(buttons.count()):
             b = buttons.nth(i)
 
@@ -83,16 +84,10 @@ def print_page_state(page, prefix=""):
         print(f"{prefix}INPUTY: {input_info}")
 
     except Exception as e:
-        print(f"[WARN] Nie można odczytać stanu strony: {e}")
+        print(f"{prefix}[WARN] Nie można odczytać stanu strony: {e}")
 
 
 def find_text_input(page):
-    """
-    NAJWAŻNIEJSZE:
-    Jeśli istnieje input 'Twoja odpowiedź', zawsze traktujemy ekran
-    jako ekran wpisywania odpowiedzi.
-    """
-
     selectors = [
         "input[placeholder='Twoja odpowiedź']",
         "textarea[placeholder='Twoja odpowiedź']",
@@ -147,17 +142,42 @@ def normalize_text(text):
 
     text = text.replace("\xa0", " ")
     text = re.sub(r"\s+", " ", text)
+
     return text.strip()
+
+
+def clean_prompt(text):
+    text = normalize_text(text)
+
+    # Usuwamy licznik np. 0/20
+    text = re.sub(r"^\d+\s*/\s*\d+\s*", "", text)
+
+    # Usuwamy przypadkowe markery strony
+    text = re.sub(
+        r"^PRZETŁUMACZ\s+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"\s+Dalej(?:\s+\[Enter\])?.*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    return normalize_text(text)
 
 
 def extract_prompt(page):
     """
-    Wyciąga TYLKO słowo/zwrot po 'PRZETŁUMACZ'.
+    Z ekranu:
 
-    Przykład:
         0/20 PRZETŁUMACZ wpaść do kogoś Dalej [Enter]
 
-    wynik:
+    zwraca:
+
         wpaść do kogoś
     """
 
@@ -166,23 +186,20 @@ def extract_prompt(page):
     if not text:
         return ""
 
-    patterns = [
-        r"PRZETŁUMACZ\s+(.+?)\s+Dalej(?:\s+\[Enter\])?",
-        r"PRZETŁUMACZ\s+(.+?)\s+Dalej",
-    ]
+    # Najważniejsze: szukamy dokładnie fragmentu po PRZETŁUMACZ.
+    match = re.search(
+        r"PRZETŁUMACZ\s+(.+?)(?:\s+Dalej(?:\s+\[Enter\])?|$)",
+        text,
+        re.IGNORECASE,
+    )
 
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        result = clean_prompt(match.group(1))
 
-        if match:
-            result = normalize_text(match.group(1))
+        if result:
+            return result
 
-            # Usuwamy ewentualne elementy licznika.
-            result = re.sub(r"^\d+\s*/\s*\d+\s*", "", result)
-
-            return result.strip()
-
-    # Awaryjnie próbujemy znaleźć element zawierający "PRZETŁUMACZ".
+    # Awaryjnie próbujemy elementu z tekstem PRZETŁUMACZ.
     try:
         elements = page.locator("text=PRZETŁUMACZ")
 
@@ -203,7 +220,10 @@ def extract_prompt(page):
                 )
 
                 if match:
-                    return normalize_text(match.group(1))
+                    result = clean_prompt(match.group(1))
+
+                    if result:
+                        return result
 
             except Exception:
                 pass
@@ -214,14 +234,17 @@ def extract_prompt(page):
     return ""
 
 
-def extract_result_answer(page):
+def extract_result_answer(page, known_prompt=""):
     """
-    Wyciąga odpowiedź z ekranu po błędnej odpowiedzi.
+    Ekran Lingos:
 
-    Przykład:
         0/20 BŁĘDNA ODPOWIEDŹ wpaść do kogoś come over Dalej [Enter]
 
-    wynik:
+    Jeśli znamy już słowo 'wpaść do kogoś', szukamy wszystkiego
+    PO NIM i PRZED 'Dalej'.
+
+    Wynik:
+
         ('wpaść do kogoś', 'come over')
     """
 
@@ -230,36 +253,18 @@ def extract_result_answer(page):
     if not text:
         return "", ""
 
-    # Najpierw próbujemy znaleźć cały fragment.
-    patterns = [
-        r"BŁĘDNA ODPOWIEDŹ\s+(.+?)\s+([^\s].*?)\s+Dalej(?:\s+\[Enter\])?",
-        r"POPRAWNA ODPOWIEDŹ\s+(.+?)\s+([^\s].*?)\s+Dalej(?:\s+\[Enter\])?",
-        r"DOBRA ODPOWIEDŹ\s+(.+?)\s+([^\s].*?)\s+Dalej(?:\s+\[Enter\])?",
-    ]
+    # ==========================================
+    # NAJPEWNIEJSZA METODA
+    # ==========================================
 
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+    if known_prompt:
+        prompt = normalize_text(known_prompt)
 
-        if match:
-            prompt = normalize_text(match.group(1))
-            answer = normalize_text(match.group(2))
-
-            prompt = re.sub(r"^\d+\s*/\s*\d+\s*", "", prompt)
-
-            return prompt, answer
-
-    # Jeśli parser wyniku nie zadziała, wykorzystujemy aktualny prompt
-    # oraz próbujemy znaleźć tekst przed "Dalej".
-    prompt = extract_prompt(page)
-
-    if prompt:
         try:
-            # Szukamy fragmentu:
-            # prompt + odpowiedź + Dalej
             escaped_prompt = re.escape(prompt)
 
             match = re.search(
-                escaped_prompt + r"\s+(.+?)\s+Dalej",
+                escaped_prompt + r"\s+(.+?)(?:\s+Dalej(?:\s+\[Enter\])?|$)",
                 text,
                 re.IGNORECASE,
             )
@@ -267,11 +272,50 @@ def extract_result_answer(page):
             if match:
                 answer = normalize_text(match.group(1))
 
-                if answer and answer.lower() != prompt.lower():
+                if answer:
+                    # Usuwamy ewentualne śmieci
+                    answer = re.sub(
+                        r"^\[Enter\]\s*",
+                        "",
+                        answer,
+                        flags=re.IGNORECASE,
+                    )
+
                     return prompt, answer
 
         except Exception:
             pass
+
+    # ==========================================
+    # AWARYJNE ROZPOZNANIE
+    # ==========================================
+
+    marker_match = re.search(
+        r"(?:BŁĘDNA ODPOWIEDŹ|POPRAWNA ODPOWIEDŹ|DOBRA ODPOWIEDŹ)\s+(.+?)"
+        r"\s+Dalej(?:\s+\[Enter\])?",
+        text,
+        re.IGNORECASE,
+    )
+
+    if marker_match:
+        fragment = normalize_text(marker_match.group(1))
+
+        if known_prompt:
+            escaped_prompt = re.escape(
+                normalize_text(known_prompt)
+            )
+
+            match = re.search(
+                escaped_prompt + r"\s+(.+)$",
+                fragment,
+                re.IGNORECASE,
+            )
+
+            if match:
+                answer = normalize_text(match.group(1))
+
+                if answer:
+                    return normalize_text(known_prompt), answer
 
     return "", ""
 
@@ -316,7 +360,6 @@ def click_next_and_wait(page):
 
         button.click()
 
-        # Dajemy Lingosowi czas na zmianę ekranu.
         for _ in range(30):
             time.sleep(0.2)
 
@@ -341,8 +384,6 @@ def submit_answer(page, text_input, answer):
 
         text_input.click()
         text_input.fill(answer)
-
-        # Enter powinien zatwierdzić odpowiedź.
         text_input.press("Enter")
 
         time.sleep(1)
@@ -353,6 +394,10 @@ def submit_answer(page, text_input, answer):
         print(f"[ERROR] Nie udało się wpisać odpowiedzi: {e}")
         return False
 
+
+# ============================================================
+# LOGOWANIE — ZOSTAWIONE TAK JAK W TWOJEJ WERSJI
+# ============================================================
 
 def login(page):
     print("[INFO] Otwieram stronę logowania...")
@@ -410,6 +455,7 @@ def login(page):
     try:
         visible_inputs[0].fill(USERNAME)
         visible_inputs[1].fill(PASSWORD)
+
     except Exception as e:
         print(f"[ERROR] Nie można wpisać danych logowania: {e}")
         return False
@@ -464,10 +510,13 @@ def login(page):
     return True
 
 
+# ============================================================
+# OTWIERANIE NAUKI — ZOSTAWIONE TAK JAK W TWOJEJ WERSJI
+# ============================================================
+
 def open_learning(page):
     print("[INFO] Szukam sekcji 'Ucz się'...")
 
-    # Najpierw próbujemy kliknąć "Ucz się".
     selectors = [
         "text=Ucz się",
         "a:has-text('Ucz się')",
@@ -499,7 +548,6 @@ def open_learning(page):
         except Exception:
             pass
 
-    # Awaryjnie bezpośredni adres.
     try:
         page.goto(
             "https://lingos.pl/learning",
@@ -518,14 +566,24 @@ def open_learning(page):
         return False
 
 
+# ============================================================
+# GŁÓWNA FUNKCJA
+# ============================================================
+
 def run():
+
     if not USERNAME or not PASSWORD:
         print("[ERROR] Brak LINGOS_USER lub LINGOS_PASS.")
         sys.exit(1)
 
     dictionary = {}
 
+    # To jest kluczowe:
+    # przechowujemy ostatnie prawidłowo wykryte słowo.
+    last_prompt = ""
+
     with sync_playwright() as p:
+
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -541,16 +599,17 @@ def run():
         )
 
         try:
-            # =========================
+
+            # ==================================================
             # LOGOWANIE
-            # =========================
+            # ==================================================
 
             if not login(page):
                 sys.exit(1)
 
-            # =========================
-            # OTWIERANIE NAUKI
-            # =========================
+            # ==================================================
+            # NAUKA
+            # ==================================================
 
             if not open_learning(page):
                 print("[ERROR] Nie udało się wejść do nauki.")
@@ -559,42 +618,29 @@ def run():
 
             print("[INFO] Rozpoczynam naukę...")
 
-            # =========================
-            # PĘTLA NAUKI
-            # =========================
-
-            last_prompt = ""
-            same_prompt_count = 0
-
             for round_number in range(1, MAX_ROUNDS + 1):
 
                 time.sleep(0.5)
 
-                # -------------------------
-                # KONIEC LEKCJI
-                # -------------------------
+                # ==================================================
+                # KONIEC
+                # ==================================================
 
                 if is_completion_screen(page):
                     print("[OK] Wykryto zakończenie nauki.")
                     break
 
-                # -------------------------
-                # 1. EKRAN WPISYWANIA
-                # -------------------------
-                #
-                # TO MUSI BYĆ SPRAWDZANE PRZED "DALEJ".
-                #
-                # Na ekranie Lingos może jednocześnie istnieć:
-                # - input "Twoja odpowiedź"
-                # - przycisk "Dalej"
-                #
-                # Input ma pierwszeństwo.
-                # -------------------------
+                # ==================================================
+                # EKRAN WPISYWANIA ODPOWIEDZI
+                # ==================================================
 
                 text_input = find_text_input(page)
 
                 if text_input:
-                    print(f"\n[{round_number}] EKRAN ODPOWIEDZI")
+
+                    print(
+                        f"\n[{round_number}] EKRAN ODPOWIEDZI"
+                    )
 
                     prompt = extract_prompt(page)
 
@@ -603,10 +649,11 @@ def run():
                         f"'{prompt}'"
                     )
 
+                    # Nie pozwalamy botowi zapisać całej strony
+                    # jako słowa.
                     if not prompt:
                         print(
-                            "[WARN] Nie udało się wyciągnąć "
-                            "słowa z ekranu."
+                            "[WARN] Nie udało się wykryć słowa."
                         )
 
                         print_page_state(
@@ -619,26 +666,26 @@ def run():
                             f"debug_answer_{round_number}",
                         )
 
-                        # Nie wpisujemy pustej odpowiedzi, jeśli
-                        # nawet nie wiemy, jakie jest słowo.
                         time.sleep(1)
                         continue
 
                     prompt_key = normalize_text(prompt).lower()
 
-                    # -------------------------
-                    # OCHRONA PRZED BŁĘDNYM PARSEREM
-                    # -------------------------
+                    # Dodatkowe zabezpieczenie.
+                    bad_parts = [
+                        "przetłumacz",
+                        "błędna odpowiedź",
+                        "poprawna odpowiedź",
+                        "dalej",
+                        "[enter]",
+                    ]
 
-                    if (
-                        "przetłumacz" in prompt_key
-                        or "błędna odpowiedź" in prompt_key
-                        or "dalej" in prompt_key
-                        or "[enter]" in prompt_key
+                    if any(
+                        part in prompt_key
+                        for part in bad_parts
                     ):
                         print(
-                            "[WARN] Parser zwrócił nieprawidłowy "
-                            "tekst jako słowo:"
+                            "[WARN] Wykryto nieprawidłowe słowo:"
                         )
                         print(f"[WARN] '{prompt}'")
 
@@ -650,11 +697,18 @@ def run():
                         time.sleep(1)
                         continue
 
-                    # -------------------------
-                    # SPRAWDZAMY SŁOWNIK
-                    # -------------------------
+                    # ==================================================
+                    # ZAPAMIĘTUJEMY PRAWDZIWE SŁOWO
+                    # ==================================================
+
+                    last_prompt = prompt
+
+                    # ==================================================
+                    # SZUKAMY ODPOWIEDZI W SŁOWNIKU
+                    # ==================================================
 
                     if prompt_key in dictionary:
+
                         answer = dictionary[prompt_key]
 
                         print(
@@ -663,25 +717,16 @@ def run():
                         )
 
                     else:
+
                         answer = ""
 
                         print(
                             "[INFO] Nie znam jeszcze odpowiedzi."
                         )
 
-                    # -------------------------
-                    # ZAPISUJEMY AKTUALNE SŁOWO
-                    # -------------------------
-
-                    if prompt_key == last_prompt:
-                        same_prompt_count += 1
-                    else:
-                        same_prompt_count = 0
-                        last_prompt = prompt_key
-
-                    # -------------------------
-                    # WPISANIE ODPOWIEDZI
-                    # -------------------------
+                    # ==================================================
+                    # WYSYŁAMY
+                    # ==================================================
 
                     if not submit_answer(
                         page,
@@ -689,28 +734,28 @@ def run():
                         answer,
                     ):
                         print(
-                            "[ERROR] Nie udało się "
-                            "wysłać odpowiedzi."
+                            "[ERROR] Nie udało się wysłać "
+                            "odpowiedzi."
                         )
-                        time.sleep(1)
-                        continue
-
-                    time.sleep(1)
 
                     continue
 
-                # -------------------------
-                # 2. EKRAN Z WYNIKIEM
-                # -------------------------
+                # ==================================================
+                # EKRAN WYNIKU
+                # ==================================================
 
                 if is_result_screen(page):
+
                     print(
                         f"\n[{round_number}] "
-                        "EKRAN Z WYNIKIEM"
+                        "EKRAN WYNIKU"
                     )
 
                     result_prompt, correct_answer = (
-                        extract_result_answer(page)
+                        extract_result_answer(
+                            page,
+                            last_prompt,
+                        )
                     )
 
                     print(
@@ -742,41 +787,51 @@ def run():
                         )
 
                     else:
+
                         print(
-                            "[WARN] Nie udało się "
-                            "wyciągnąć poprawnej odpowiedzi."
+                            "[ERROR] Nie udało się odczytać "
+                            "poprawnej odpowiedzi."
                         )
 
                         print(
                             "[DEBUG] Treść strony:"
                         )
-                        print(body_text(page)[:3000])
 
-                    if not click_next_and_wait(page):
-                        time.sleep(1)
+                        print(
+                            body_text(page)[:3000]
+                        )
+
+                        screenshot(
+                            page,
+                            f"result_error_{round_number}",
+                        )
+
+                    click_next_and_wait(page)
 
                     continue
 
-                # -------------------------
-                # 3. EKRAN Z "DALEJ"
-                # -------------------------
+                # ==================================================
+                # SAM PRZYCISK DALEJ
+                # ==================================================
 
                 next_button = find_next_button(page)
 
                 if next_button:
+
                     print(
                         f"\n[{round_number}] "
                         "EKRAN Z PRZYCISKIEM 'DALEJ'."
                     )
 
-                    # Jeśli jesteśmy tutaj, NIE ma inputa.
-                    # Czyli jest to ekran po odpowiedzi.
-
                     result_prompt, correct_answer = (
-                        extract_result_answer(page)
+                        extract_result_answer(
+                            page,
+                            last_prompt,
+                        )
                     )
 
                     if result_prompt and correct_answer:
+
                         key = normalize_text(
                             result_prompt
                         ).lower()
@@ -792,20 +847,14 @@ def run():
                             f"'{result_prompt}' -> "
                             f"'{answer}'"
                         )
-                    else:
-                        print(
-                            "[INFO] Nie udało się "
-                            "wyciągnąć wyniku z ekranu."
-                        )
 
-                    if not click_next_and_wait(page):
-                        time.sleep(1)
+                    click_next_and_wait(page)
 
                     continue
 
-                # -------------------------
-                # 4. NIEZNANY EKRAN
-                # -------------------------
+                # ==================================================
+                # NIEZNANY EKRAN
+                # ==================================================
 
                 print(
                     f"\n[{round_number}] "
@@ -820,7 +869,10 @@ def run():
                 print(
                     "[DEBUG] Fragment strony:"
                 )
-                print(body_text(page)[:2500])
+
+                print(
+                    body_text(page)[:2500]
+                )
 
                 screenshot(
                     page,
@@ -830,10 +882,15 @@ def run():
                 time.sleep(2)
 
             else:
+
                 print(
                     f"[WARN] Osiągnięto limit "
                     f"{MAX_ROUNDS} rund."
                 )
+
+            # ==================================================
+            # PODSUMOWANIE
+            # ==================================================
 
             print()
             print(
@@ -849,10 +906,16 @@ def run():
             print("[OK] Bot zakończył działanie.")
 
         except Exception as e:
-            print(f"[FATAL] {type(e).__name__}: {e}")
+
+            print(
+                f"[FATAL] {type(e).__name__}: {e}"
+            )
 
             try:
-                screenshot(page, "fatal_error")
+                screenshot(
+                    page,
+                    "fatal_error",
+                )
             except Exception:
                 pass
 
