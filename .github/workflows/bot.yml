@@ -3,9 +3,7 @@ name: Lingos Daily Auto
 on:
   workflow_dispatch:
   schedule:
-    # 05:00 UTC = 07:00 czasu polskiego (w czasie letnim)
-    # 06:00 UTC = 07:00 czasu polskiego (w czasie zimowym)
-    - cron: '0 5 * * *'
+    - cron: '0 5 * * 1-5'
 
 jobs:
   run-lingos:
